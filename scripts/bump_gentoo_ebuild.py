@@ -54,6 +54,18 @@ def main() -> int:
     template_path = existing[-1]
     txt = template_path.read_text(encoding="utf-8")
 
+    # Ensure FLAC is present in the template ebuild dependencies.
+    # Newer versions can record in MP3 or FLAC, so we want both encoders available.
+    if "media-sound/flac" not in txt:
+        txt = txt.replace("\n\tmedia-sound/lame\n", "\n\tmedia-sound/lame\n\tmedia-sound/flac\n")
+
+    # Ensure postinst mentions FLAC as well.
+    if "FLAC recording" not in txt:
+        txt = txt.replace(
+            "\n\teinfo \"  - lame (from media-sound/lame)\"\n",
+            "\n\teinfo \"  - lame (MP3 recording; from media-sound/lame)\"\n\teinfo \"  - flac (FLAC recording; from media-sound/flac)\"\n",
+        )
+
     # Update MY_TAG.
     if "MY_TAG=" not in txt:
         raise SystemExit("Template ebuild missing MY_TAG")

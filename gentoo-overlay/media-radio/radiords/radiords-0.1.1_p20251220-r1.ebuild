@@ -27,6 +27,7 @@ RDEPEND="
 	media-radio/rtl-sdr
 	media-sound/sox
 	media-sound/lame
+	media-sound/flac
 	media-sound/alsa-utils
 "
 
@@ -47,7 +48,8 @@ pkg_postinst() {
 	einfo "Runtime tools required for full functionality (must be in PATH):"
 	einfo "  - rtl_fm (usually from media-radio/rtl-sdr)"
 	einfo "  - play (from media-sound/sox)"
-	einfo "  - lame (from media-sound/lame)"
+		einfo "  - lame (MP3 recording; from media-sound/lame)"
+		einfo "  - flac (FLAC recording; from media-sound/flac)"
 	einfo "  - amixer (from media-sound/alsa-utils)"
 	einfo "  - redsea (RDS decoder; package name may vary on Gentoo/overlays)"
 	einfo
