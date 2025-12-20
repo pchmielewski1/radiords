@@ -18,6 +18,9 @@ ENV/
 recordings/
 radio_recording_debug.txt
 
+# Local-only agent notes/policy
+agent.md
+
 # Build artifacts (publish .deb via GitHub Releases, not the repo)
 dist/*.deb
 dist/*.changes
