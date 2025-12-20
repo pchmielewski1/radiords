@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# IDE / OS
+.vscode/
+.DS_Store
+
+# Local runtime outputs
+recordings/
+radio_recording_debug.txt
+
+# Build artifacts (publish .deb via GitHub Releases, not the repo)
+dist/*.deb
+dist/*.changes
+dist/*.buildinfo
+dist/debroot/
