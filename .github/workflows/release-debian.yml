@@ -1,27 +1,32 @@
 name: Release Debian .deb
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       base_version:
-        description: "Base SemVer (e.g. 0.1.0)"
-        required: true
-        default: "0.1.0"
-      date_yyyymmdd:
-        description: "UTC date YYYYMMDD (optional; leave empty for today UTC)"
+        description: "Base SemVer override (optional; default from VERSION file)"
         required: false
         default: ""
-      update_gentoo_overlay:
-        description: "Also bump Gentoo ebuild in gentoo-overlay/"
-        required: true
-        default: "true"
+      date_yyyymmdd:
+        description: "UTC date YYYYMMDD override (optional; default = today UTC)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Prevent infinite loops when this workflow pushes commits itself.
+    if: github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,10 +45,19 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.date_yyyymmdd }}" ]; then
-            VERSION=$(python3 scripts/compute_deb_version.py --base "${{ inputs.base_version }}" --date "${{ inputs.date_yyyymmdd }}")
+          BASE="${{ github.event.inputs.base_version }}"
+          DATE="${{ github.event.inputs.date_yyyymmdd }}"
+          if [ -z "$BASE" ]; then
+            BASE=$(tr -d '\n\r\t ' < VERSION)
+          fi
+          if [ -z "$BASE" ]; then
+            echo "VERSION file is empty; set a base SemVer like 0.1.0" >&2
+            exit 1
+          fi
+          if [ -n "$DATE" ]; then
+            VERSION=$(python3 scripts/compute_deb_version.py --base "$BASE" --date "$DATE")
           else
-            VERSION=$(python3 scripts/compute_deb_version.py --base "${{ inputs.base_version }}")
+            VERSION=$(python3 scripts/compute_deb_version.py --base "$BASE")
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
@@ -74,7 +88,6 @@ jobs:
           generate_release_notes: true
 
       - name: Bump Gentoo ebuild
-        if: ${{ inputs.update_gentoo_overlay == 'true' }}
         run: |
           set -euo pipefail
           python3 scripts/bump_gentoo_ebuild.py "${{ steps.ver.outputs.version }}"
