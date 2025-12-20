@@ -30,8 +30,8 @@
   - RDS uses `rtl_fm` (also RTL-SDR).
 - Code enforces this by disabling RDS updater during recording (`start_recording()` sets `rds_updating=False`) and by skipping RDS updates while recording (`rds_updater()` checks `self.recording`). Preserve this rule when changing pipelines.
 
-## Recording pipeline (MP3) specifics
-- Recording uses `lame` fed with the same PCM bytes as playback (`stream_audio()` writes to both).
+## Recording pipeline (MP3/FLAC) specifics
+- Recording uses an external encoder (`lame` for MP3 or `flac` for FLAC) fed with the same PCM bytes as playback (`stream_audio()` writes to both).
 - Finalization is intentional: `stop_recording()` closes stdin and waits in a background thread (`_finalize_recording_proc`) so LAME can write headers/tags. Don’t replace with immediate kill.
 
 ## On-disk formats and where they live

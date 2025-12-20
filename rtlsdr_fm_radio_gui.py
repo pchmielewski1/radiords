@@ -194,6 +194,7 @@ I18N = {
         "group_ui": "Interfejs",
         "language": "Język:",
         "recordings_dir": "Katalog nagrań:",
+        "recording_format": "Format nagrania:",
         "dark_mode": "Tryb ciemny:",
         "osmosdr_args": "osmosdr args:",
         "ppm": "PPM:",
@@ -222,6 +223,7 @@ I18N = {
         "pick_station": "Wybierz stację z listy",
         "station_not_found": "Nie znaleziono danych stacji",
         "need_playback_first": "Najpierw włącz odtwarzanie stacji",
+        "missing_recording_encoder": "Brak enkodera do nagrywania ({tool}). Zainstaluj go, aby nagrywać w formacie {format}.",
         "bad_freq": "Nieprawidłowa częstotliwość",
         "freq_out_of_range": "Częstotliwość poza zakresem {min:.1f}-{max:.1f} MHz",
         "playing": "▶ Odtwarzanie: {name}",
@@ -297,6 +299,7 @@ I18N = {
         "group_ui": "UI",
         "language": "Language:",
         "recordings_dir": "Recordings folder:",
+        "recording_format": "Recording format:",
         "dark_mode": "Dark mode:",
         "osmosdr_args": "osmosdr args:",
         "ppm": "PPM:",
@@ -325,6 +328,7 @@ I18N = {
         "pick_station": "Select a station from the list",
         "station_not_found": "Station data not found",
         "need_playback_first": "Start playback first",
+        "missing_recording_encoder": "Missing recording encoder ({tool}). Install it to record in {format}.",
         "bad_freq": "Invalid frequency",
         "freq_out_of_range": "Frequency out of range {min:.1f}-{max:.1f} MHz",
         "playing": "▶ Playing: {name}",
@@ -3081,6 +3085,8 @@ class FMRadioGUI:
             "recording": {
                 # Can be relative (to BASE_DIR) or absolute.
                 "output_dir": "recordings",
+                # Recording format: "mp3" (lossy) or "flac" (lossless).
+                "format": "mp3",
             },
             "audio": {
                 "demod_rate_hz": 240000,
@@ -3200,6 +3206,15 @@ class FMRadioGUI:
             os.makedirs(self.recordings_dir, exist_ok=True)
         except Exception:
             pass
+
+        # Recording format
+        try:
+            rec_fmt = str(rec.get("format") or "mp3").strip().lower()
+        except Exception:
+            rec_fmt = "mp3"
+        if rec_fmt not in ("mp3", "flac"):
+            rec_fmt = "mp3"
+        self.recording_format = rec_fmt
 
         self.osmosdr_args = str(sdr.get("osmosdr_args") or self.osmosdr_args)
         try:
@@ -3610,6 +3625,10 @@ class FMRadioGUI:
 
         var_lang = tk.StringVar(value=current_lang_disp)
         var_rec_dir = tk.StringVar(value=str(rec.get("output_dir", "recordings")))
+        _rec_fmt = str(rec.get("format") or "mp3").strip().lower()
+        if _rec_fmt not in ("mp3", "flac"):
+            _rec_fmt = "mp3"
+        var_rec_format = tk.StringVar(value=_rec_fmt)
 
         var_dark_mode = tk.BooleanVar(value=(str(ui.get("theme") or getattr(self, "ui_theme", "light")) == "dark"))
 
@@ -3671,6 +3690,17 @@ class FMRadioGUI:
         row.pack(fill=tk.X, pady=2)
         ttk.Label(row, text=self.t("recordings_dir"), width=14).pack(side=tk.LEFT)
         ttk.Entry(row, textvariable=var_rec_dir).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        row = ttk.Frame(lf_ui)
+        row.pack(fill=tk.X, pady=2)
+        ttk.Label(row, text=self.t("recording_format"), width=14).pack(side=tk.LEFT)
+        ttk.Combobox(
+            row,
+            textvariable=var_rec_format,
+            values=["mp3", "flac"],
+            state="readonly",
+            width=10,
+        ).pack(side=tk.LEFT)
 
         row = ttk.Frame(lf_ui)
         row.pack(fill=tk.X, pady=2)
@@ -3847,6 +3877,10 @@ class FMRadioGUI:
                 if not new_rec_dir:
                     new_rec_dir = "recordings"
 
+                new_rec_format = str(var_rec_format.get() or "mp3").strip().lower()
+                if new_rec_format not in ("mp3", "flac"):
+                    new_rec_format = "mp3"
+
                 chosen_fm_disp = str(var_fm_band.get() or "").strip()
                 new_fm_preset = preset_by_display.get(chosen_fm_disp) or DEFAULT_FM_BAND_PRESET
                 if new_fm_preset not in FM_BAND_PRESETS:
@@ -3881,6 +3915,7 @@ class FMRadioGUI:
             }
             self.settings["recording"] = {
                 "output_dir": new_rec_dir,
+                "format": new_rec_format,
             }
             self.settings["sdr"] = {
                 "osmosdr_args": new_osmo,
@@ -4480,7 +4515,7 @@ class FMRadioGUI:
             self.stop_recording(quiet=quiet)
     
     def start_recording(self):
-        """Start MP3 recording (stereo)."""
+        """Start recording (stereo)."""
         debug_log("=" * 60)
         debug_log("DEBUG: start_recording() ROZPOCZĘCIE")
         debug_log(f"DEBUG: self.playing = {self.playing}")
@@ -4494,6 +4529,18 @@ class FMRadioGUI:
             return
         
         debug_log("DEBUG: Sprawdzenie odtwarzania OK - kontynuuję")
+
+        # Pick encoder based on settings.
+        rec_fmt = str(getattr(self, "recording_format", None) or (self.settings.get("recording", {}) or {}).get("format") or "mp3").strip().lower()
+        if rec_fmt not in ("mp3", "flac"):
+            rec_fmt = "mp3"
+        encoder_tool = "flac" if rec_fmt == "flac" else "lame"
+        # Ensure encoder exists before touching UI state.
+        try:
+            subprocess.run(["which", encoder_tool], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError:
+            messagebox.showerror(self.t("err"), self.t("missing_recording_encoder", tool=encoder_tool, format=rec_fmt.upper()))
+            return
         
         # NOW disable the button to prevent repeated clicks
         debug_log("DEBUG: Wyłączam przycisk start...")
@@ -4532,7 +4579,8 @@ class FMRadioGUI:
         except Exception:
             pass
 
-        filename = os.path.join(out_dir, f"recording_{station_name}_{timestamp}.mp3")
+        ext = "flac" if rec_fmt == "flac" else "mp3"
+        filename = os.path.join(out_dir, f"recording_{station_name}_{timestamp}.{ext}")
         display_name = os.path.basename(filename)
         debug_log(f"DEBUG: Wygenerowana nazwa pliku: '{filename}'")
         
@@ -4541,22 +4589,48 @@ class FMRadioGUI:
         
         try:
             debug_log("DEBUG: ROZPOCZYNAM BLOK TRY dla subprocess...")
-            # Start the LAME encoder; it receives PCM from stream_audio()
-            # Explicit PCM format: signed 16-bit little-endian, stereo, 48kHz
-            lame_cmd = [
-                'lame',
-                '--quiet',
-                '-r', '--signed', '--little-endian', '--bitwidth', '16',
-                '-s', '48',
-                '-m', 'j',
-                '--cbr', '-b', '192',
-                '-q', '2',
-                '-', filename
-            ]
-            debug_log(f"DEBUG: Komenda lame: {' '.join(lame_cmd)}")
+            # Start the encoder; it receives PCM from stream_audio()
+            # PCM format: signed 16-bit little-endian, stereo, 48kHz
+            if rec_fmt == "flac":
+                enc_cmd = [
+                    "flac",
+                    "--silent",
+                    "-8",
+                    "--force-raw-format",
+                    "--endian=little",
+                    "--sign=signed",
+                    "--channels=2",
+                    "--bps=16",
+                    "--sample-rate=48000",
+                    "-o",
+                    filename,
+                    "-",
+                ]
+            else:
+                enc_cmd = [
+                    "lame",
+                    "--quiet",
+                    "-r",
+                    "--signed",
+                    "--little-endian",
+                    "--bitwidth",
+                    "16",
+                    "-s",
+                    "48",
+                    "-m",
+                    "j",
+                    "--cbr",
+                    "-b",
+                    "192",
+                    "-q",
+                    "2",
+                    "-",
+                    filename,
+                ]
+            debug_log(f"DEBUG: Komenda encoder: {' '.join(enc_cmd)}")
             
             debug_log("DEBUG: Wywołuję subprocess.Popen()...")
-            self.record_proc = subprocess.Popen(lame_cmd,
+            self.record_proc = subprocess.Popen(enc_cmd,
                                                stdin=subprocess.PIPE,
                                                stdout=subprocess.DEVNULL,
                                                stderr=subprocess.DEVNULL,
@@ -4665,7 +4739,7 @@ class FMRadioGUI:
         self.record_filename = None
 
     def _finalize_recording_proc(self, proc, filename):
-        """Close stdin and wait for LAME to finalize the file (in background, without freezing the GUI)."""
+        """Close stdin and wait for the encoder to finalize the file (in background, without freezing the GUI)."""
         try:
             try:
                 if proc.stdin:
@@ -4673,11 +4747,11 @@ class FMRadioGUI:
             except Exception as e:
                 debug_log(f"DEBUG: finalize: close stdin error: {e}")
 
-            # Give LAME a moment to finalize the file.
+            # Give the encoder a moment to finalize the file.
             try:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                debug_log("DEBUG: finalize: LAME nie zakończył się w 3s, terminate()")
+                debug_log("DEBUG: finalize: encoder not finished in 3s, terminate()")
                 try:
                     proc.terminate()
                 except Exception:
@@ -4692,7 +4766,7 @@ class FMRadioGUI:
                         pass
 
             rc = proc.poll()
-            debug_log(f"DEBUG: finalize: LAME exit code = {rc}")
+            debug_log(f"DEBUG: finalize: encoder exit code = {rc}")
 
         finally:
             # Update status in the GUI (main thread).
@@ -4751,11 +4825,11 @@ class FMRadioGUI:
                     except Exception as e:
                         break
                 
-                # If recording, also send to lame.
+                # If recording, also send to the encoder.
                 if self.recording and self.record_proc and self.record_proc.stdin:
-                    # If LAME died, stop recording (but do not stop playback).
+                    # If encoder died, stop recording (but do not stop playback).
                     if self.record_proc.poll() is not None:
-                        debug_log(f"DEBUG: LAME padł w trakcie nagrywania, rc={self.record_proc.poll()}")
+                        debug_log(f"DEBUG: Encoder died during recording, rc={self.record_proc.poll()}")
                         self.recording = False
                         self.root.after(0, lambda: self.record_stop_button.config(state=tk.DISABLED))
                         self.root.after(0, lambda: self.record_start_button.config(state=tk.NORMAL))
@@ -4764,12 +4838,12 @@ class FMRadioGUI:
                             self.record_proc.stdin.write(audio_data)
                             self.record_bytes_written += len(audio_data)
                         except BrokenPipeError as e:
-                            debug_log(f"DEBUG: BrokenPipe do LAME: {e}")
+                            debug_log(f"DEBUG: BrokenPipe to encoder: {e}")
                             self.recording = False
                             self.root.after(0, lambda: self.record_stop_button.config(state=tk.DISABLED))
                             self.root.after(0, lambda: self.record_start_button.config(state=tk.NORMAL))
                         except Exception as e:
-                            debug_log(f"DEBUG: write do LAME error: {e}")
+                            debug_log(f"DEBUG: write to encoder error: {e}")
                             # Do not interrupt playback.
                             self.recording = False
                             self.root.after(0, lambda: self.record_stop_button.config(state=tk.DISABLED))

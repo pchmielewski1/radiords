@@ -12,7 +12,8 @@
     "theme": "dark"
   },
   "recording": {
-    "output_dir": "recordings"
+    "output_dir": "recordings",
+    "format": "mp3"
   },
   "audio": {
     "demod_rate_hz": 240000,

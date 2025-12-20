@@ -3,7 +3,7 @@ Version: @VERSION@
 Section: hamradio
 Priority: optional
 Architecture: all
-Depends: python3, python3-tk, python3-numpy, python3-matplotlib, gnuradio, gr-osmosdr, rtl-sdr, sox, lame, alsa-utils
+Depends: python3, python3-tk, python3-numpy, python3-matplotlib, gnuradio, gr-osmosdr, rtl-sdr, sox, lame, flac, alsa-utils
 Recommends: fonts-noto-cjk, fonts-noto-core, fonts-noto-extra, fonts-noto-ui-core, fonts-noto-ui-extra, fonts-thai-tlwg, fonts-meera-inimai, fonts-yrsa-rasa, fonts-beng-extra, fonts-lohit-deva, fonts-lohit-telu, fonts-lohit-taml, fonts-lohit-gujr, fonts-lohit-beng-bengali
 Suggests: redsea
 Maintainer: radiords <noreply@example.com>
