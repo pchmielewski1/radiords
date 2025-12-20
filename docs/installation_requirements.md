@@ -199,33 +199,38 @@ This repo can build a `.deb` package so you can install the app system-wide and 
 
 The package is generated into `dist/` (e.g. `dist/radiords_…_all.deb`).
 
-### 10.2 Instalacja
+### 10.2 Installation
 
-Zainstaluj paczkę:
+Install the package:
 
 ```bash
 sudo dpkg -i dist/radiords_*_all.deb
 ```
 
-Jeśli system zgłosi brak zależności, doinstaluj je:
+If the system reports missing dependencies, install them:
 
 ```bash
 sudo apt-get -f install
 ```
 
-Uruchomienie:
+Run:
 
 ```bash
 radiords
 ```
 
-## 11) Gdzie aplikacja zapisuje pliki (ważne po instalacji systemowej)
+## 11) Where the app stores files (important for system-wide installs)
 
-Gdy aplikacja jest uruchamiana z repo (katalog jest zapisywalny), używa plików obok skryptu.
+When running from the repo (the folder is writable), the app uses files next to the script.
 
-Gdy aplikacja jest zainstalowana systemowo (np. w `/usr/lib/...`), katalog programu zwykle **nie jest zapisywalny** — wtedy aplikacja automatycznie przechodzi na katalogi użytkownika (XDG):
+When installed system-wide (e.g. under `/usr/lib/...`), the app directory is usually **not writable** — then the app automatically switches to per-user XDG directories:
 
 - Ustawienia: `~/.config/radiords/fm_radio_settings.json`
 - Baza stacji: `~/.local/share/radiords/fm_stations_database.json`
 - Debug log: `~/.local/state/radiords/radio_recording_debug.txt`
 - Domyślny katalog nagrań: `~/.local/share/radiords/recordings/` (lub zgodnie z `recording.output_dir`)
+
+- Settings: `~/.config/radiords/fm_radio_settings.json`
+- Station database: `~/.local/share/radiords/fm_stations_database.json`
+- Debug log: `~/.local/state/radiords/radio_recording_debug.txt`
+- Default recordings directory: `~/.local/share/radiords/recordings/` (or as configured via `recording.output_dir`)

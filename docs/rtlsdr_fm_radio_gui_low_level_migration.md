@@ -60,6 +60,11 @@ The full list of installation requirements (including font packages for plots an
 - `rtl_fm` + `redsea` — dekodowanie RDS
 - `amixer` — ustawianie głośności
 
+- `play` (sox) — plays raw PCM
+- `lame` — MP3 encoding
+- `rtl_fm` + `redsea` — RDS decoding
+- `amixer` — volume control
+
 ### 3.3 Fonts (important for matplotlib + i18n)
 
 Note: Tkinter and Matplotlib can use different fonts. To ensure plot labels (legends/titles/axis labels) work for non-Latin scripts (e.g., CJK, Arabic, Hindi, Bengali, Telugu, Tamil, Thai, Gujarati), install the appropriate font packages — see [docs/installation_requirements.md](installation_requirements.md).
@@ -98,7 +103,7 @@ Tkinter is not thread-safe:
 
 ### 4.3 Audio pipeline (true stereo)
 
-Implementacja w `_start_gnuradio_rx(freq_mhz, gain_db)`:
+Implementation in `_start_gnuradio_rx(freq_mhz, gain_db)`:
 - `osmosdr.source` (RTL-SDR) z parametrami:
 	- `sample_rate = demod_rate_hz`
 	- `center_freq = freq_mhz * 1e6`
@@ -109,6 +114,18 @@ Implementacja w `_start_gnuradio_rx(freq_mhz, gain_db)`:
 - `float_to_short(scale=32767)` dla obu.
 - `blocks.interleave` do formatu interleaved S16_LE.
 - `file_descriptor_sink` zapisuje do `os.pipe()`.
+
+Implementation in `_start_gnuradio_rx(freq_mhz, gain_db)`:
+- `osmosdr.source` (RTL-SDR) with parameters:
+	- `sample_rate = demod_rate_hz`
+	- `center_freq = freq_mhz * 1e6`
+	- `freq_corr = ppm`
+	- `gain = gain_db`
+	- `bandwidth = rf_bandwidth_hz`
+- `analog.wfm_rcv_pll(demod_rate, audio_decim, deemph_tau)` produces two float channels (L and R).
+- `float_to_short(scale=32767)` for both.
+- `blocks.interleave` to interleaved S16_LE.
+- `file_descriptor_sink` writes to `os.pipe()`.
 
 Pipe format (contract):
 - stereo, interleaved

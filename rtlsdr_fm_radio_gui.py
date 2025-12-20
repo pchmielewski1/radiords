@@ -4187,7 +4187,7 @@ class FMRadioGUI:
         iid = sel[0]
         station = self._station_by_iid.get(iid)
         if not station:
-            # Fallback: spróbuj po częstotliwości
+            # Fallback: try resolving by frequency.
             try:
                 freq = float(iid.split('_')[0])
                 station = self.db.stations.get(freq)
@@ -4201,7 +4201,7 @@ class FMRadioGUI:
         self.play_station(station)
     
     def play_station(self, station):
-        """Odtwarzaj stację FM"""
+        """Play an FM station."""
         if self.playing:
             self.stop_playback()
         
@@ -4218,7 +4218,7 @@ class FMRadioGUI:
             if not _GNURADIO_OK:
                 raise RuntimeError("Brak GNU Radio/osmosdr – nie można uruchomić stereo RX")
 
-            # Ustaw głośność przed startem
+            # Set volume before starting.
             try:
                 subprocess.run(['amixer', 'sset', 'Master', f'{self.volume}%'],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -4231,29 +4231,29 @@ class FMRadioGUI:
             # sox play - stereo S16_LE @ 48k
             play_cmd = ['play', '-t', 'raw', '-r', '48k', '-e', 'signed',
                        '-b', '16', '-c', '2', '-V1', '-q',
-                       '--buffer', '8192', '-']  # Większy bufor sox
+                       '--buffer', '8192', '-']  # Larger sox buffer
             
             self.play_proc = subprocess.Popen(play_cmd,
-                                             stdin=subprocess.PIPE,  # Będziemy pisać manualnie
+                                             stdin=subprocess.PIPE,  # We write manually
                                              stdout=subprocess.DEVNULL,
                                              stderr=subprocess.DEVNULL,
                                              start_new_session=True,
                                              bufsize=65536)  # 64KB bufor
             
-            # Uruchom wątek do odczytu audio i przekazania do sox
+            # Start the thread that reads audio and feeds sox.
             self.playing = True
             self.spectrum_running = True
             self.rds_updating = True
             
-            # Thread do streamowania audio
+            # Audio streaming thread.
             audio_thread = threading.Thread(target=self.stream_audio, daemon=True)
             audio_thread.start()
             
-            # Thread do spektrum (osobno!)
+            # Spectrum thread (separate).
             spectrum_thread = threading.Thread(target=self.spectrum_analyzer, daemon=True)
             spectrum_thread.start()
             
-            # Thread do aktualizacji RDS (opcjonalny)
+            # RDS update thread (optional).
             if getattr(self, "enable_rds_updates", True):
                 rds_thread = threading.Thread(target=self.rds_updater, daemon=True)
                 rds_thread.start()
@@ -4261,7 +4261,7 @@ class FMRadioGUI:
             self.play_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
             self.scan_button.config(state=tk.DISABLED)
-            self.record_start_button.config(state=tk.NORMAL)  # Włącz przycisk start nagrywania
+            self.record_start_button.config(state=tk.NORMAL)  # Enable recording start
             self.record_stop_button.config(state=tk.DISABLED)  # Stop jest disabled
             
         except Exception as e:
@@ -4269,10 +4269,10 @@ class FMRadioGUI:
             messagebox.showerror(self.t("err"), f"Nie można odtworzyć stacji: {e}")
 
     def _start_gnuradio_rx(self, freq_mhz, gain_db):
-        """Uruchom GNU Radio RX i wystaw stereo PCM (S16_LE, interleaved) na pipe dla stream_audio()."""
+        """Start GNU Radio RX and expose stereo PCM (S16_LE, interleaved) via a pipe for stream_audio()."""
         self._stop_gnuradio_rx()
 
-        # Pipe do transportu PCM
+        # Pipe used to transport PCM.
         r_fd, w_fd = os.pipe()
         self._gr_pipe_r = r_fd
         self._gr_pipe_w = w_fd
@@ -4580,17 +4580,17 @@ class FMRadioGUI:
             self.record_status_label.config(text=self.t("recording_log", file=display_name))
             debug_log("DEBUG: Status label zaktualizowany")
             
-            # WŁĄCZ PRZYCISK STOP przez after() żeby na pewno GUI się odświeżyło
+            # Enable the STOP button via after() to ensure the GUI refreshes.
             debug_log("DEBUG: Włączam przycisk STOP przez after()...")
             def enable_stop_button():
                 debug_log("DEBUG: after() callback - włączam STOP button")
                 self.record_stop_button.config(state=tk.NORMAL)
                 debug_log("DEBUG: STOP button powinien być AKTYWNY!")
             
-            self.root.after(1, enable_stop_button)  # Za 1ms włącz przycisk
+            self.root.after(1, enable_stop_button)  # Enable after 1ms
             debug_log("DEBUG: Zaplanowano włączenie przycisku STOP")
             
-            # Uruchom timer do aktualizacji rozmiaru (z opóźnieniem 1s)
+            # Start the file size update timer (1s delay).
             debug_log("DEBUG: Uruchamiam timer update_record_size (1000ms)...")
             self.record_size_updater = self.root.after(1000, self.update_record_size)
             debug_log(f"DEBUG: Timer uruchomiony: ID={self.record_size_updater}")
@@ -4605,7 +4605,7 @@ class FMRadioGUI:
             import traceback
             debug_log(f"DEBUG: Traceback:\n{traceback.format_exc()}")
             
-            # Jeśli błąd - przywróć przyciski
+            # On error, restore the button states.
             debug_log("DEBUG: Przywracam stan przycisków po błędzie...")
             self.record_start_button.config(state=tk.NORMAL)
             self.record_stop_button.config(state=tk.DISABLED)
@@ -4616,14 +4616,14 @@ class FMRadioGUI:
             debug_log("=" * 60)
     
     def stop_recording(self, quiet=False):
-        """Zatrzymaj nagrywanie."""
+        """Stop recording."""
         if not self.recording:
             return
         
-        # NAJPIERW ustaw flagę
+        # FIRST: flip the flag.
         self.recording = False
         
-        # Anuluj timer rozmiaru
+        # Cancel the size timer.
         if self.record_size_updater:
             try:
                 self.root.after_cancel(self.record_size_updater)
@@ -4634,12 +4634,12 @@ class FMRadioGUI:
         if not quiet and not getattr(self, '_closing', False):
             self.log(self.t("recording_stopped"))
         
-        # Włącz z powrotem RDS updater jeśli coś gra
+        # Re-enable the RDS updater if playback is running.
         if self.playing and not getattr(self, '_closing', False):
             self.rds_updating = True
         
-        # FINALIZACJA MP3: nie zabijaj LAME od razu.
-        # LAME często zapisuje poprawne nagłówki/tagi dopiero po EOF na stdin.
+        # MP3 FINALIZATION: do not kill LAME immediately.
+        # LAME often writes proper headers/tags only after EOF on stdin.
         proc = self.record_proc
         filename = self.record_filename
         self.record_proc = None
@@ -4651,21 +4651,21 @@ class FMRadioGUI:
                 daemon=True
             ).start()
         
-        # Zmień przyciski
+        # Update buttons.
         if not quiet and not getattr(self, '_closing', False):
             try:
-                self.record_start_button.config(state=tk.NORMAL)    # Włącz start
-                self.record_stop_button.config(state=tk.DISABLED)   # Wyłącz stop
+                self.record_start_button.config(state=tk.NORMAL)    # Enable start
+                self.record_stop_button.config(state=tk.DISABLED)   # Disable stop
             except Exception:
                 pass
         
-        # Nie używaj root.update() (potrafi wieszać Tk). UI odświeży się samo.
+        # Do not use root.update() (it can hang Tk). The UI will refresh on its own.
         
-        # Status końcowy ustawi wątek finalizacji
+        # The final status will be set by the finalize thread.
         self.record_filename = None
 
     def _finalize_recording_proc(self, proc, filename):
-        """Zamknij stdin i poczekaj aż LAME domknie plik (w tle, bez wieszania GUI)."""
+        """Close stdin and wait for LAME to finalize the file (in background, without freezing the GUI)."""
         try:
             try:
                 if proc.stdin:
@@ -4673,7 +4673,7 @@ class FMRadioGUI:
             except Exception as e:
                 debug_log(f"DEBUG: finalize: close stdin error: {e}")
 
-            # Daj LAME chwilę na domknięcie pliku
+            # Give LAME a moment to finalize the file.
             try:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
@@ -4695,7 +4695,7 @@ class FMRadioGUI:
             debug_log(f"DEBUG: finalize: LAME exit code = {rc}")
 
         finally:
-            # Ustaw status w GUI w main thread
+            # Update status in the GUI (main thread).
             def _update_done_label():
                 try:
                     if filename and os.path.exists(filename):
@@ -4716,13 +4716,13 @@ class FMRadioGUI:
                 pass
     
     def stream_audio(self):
-        """Streamuj audio (stereo) do sox i buforuj dla spektrum."""
+        """Stream stereo audio to sox and buffer it for the spectrum analyzer."""
         try:
-            # 1 frame stereo = 4 bajty (2x int16)
-            chunk_bytes = 4096  # małe chunki => mniejszy lag
+            # 1 stereo frame = 4 bytes (2x int16).
+            chunk_bytes = 4096  # Small chunks => lower latency
             
             while self.playing and self.play_proc:
-                # Czytaj dane z GNU Radio pipe
+                # Read from the GNU Radio pipe.
                 audio_data = None
                 if self._gr_pipe_file is not None:
                     try:
@@ -4742,7 +4742,7 @@ class FMRadioGUI:
                     if not audio_data:
                         continue
                 
-                # Przekaż do sox (odtwarzanie) - to jest priorytet!
+                # Send to sox (playback) — priority path.
                 if self.play_proc and self.play_proc.stdin:
                     try:
                         self.play_proc.stdin.write(audio_data)
@@ -4751,9 +4751,9 @@ class FMRadioGUI:
                     except Exception as e:
                         break
                 
-                # Jeśli nagrywamy, wyślij też do lame
+                # If recording, also send to lame.
                 if self.recording and self.record_proc and self.record_proc.stdin:
-                    # Jeśli LAME padł, przerwij nagrywanie (ale nie odtwarzanie)
+                    # If LAME died, stop recording (but do not stop playback).
                     if self.record_proc.poll() is not None:
                         debug_log(f"DEBUG: LAME padł w trakcie nagrywania, rc={self.record_proc.poll()}")
                         self.recording = False
@@ -4770,16 +4770,16 @@ class FMRadioGUI:
                             self.root.after(0, lambda: self.record_start_button.config(state=tk.NORMAL))
                         except Exception as e:
                             debug_log(f"DEBUG: write do LAME error: {e}")
-                            # Nie przerywaj odtwarzania
+                            # Do not interrupt playback.
                             self.recording = False
                             self.root.after(0, lambda: self.record_stop_button.config(state=tk.DISABLED))
                             self.root.after(0, lambda: self.record_start_button.config(state=tk.NORMAL))
                 
-                # Dodaj do bufora dla spektrum (z lockiem i limitem)
+                # Add to spectrum buffer (with lock and limit).
                 if self.spectrum_running:
                     with self.audio_lock:
                         self.audio_buffer.append(audio_data)
-                        # Ogranicz bufor do max 10 chunków
+                        # Limit buffer to max 10 chunks.
                         if len(self.audio_buffer) > 10:
                             self.audio_buffer = self.audio_buffer[-10:]
                         
@@ -4789,23 +4789,23 @@ class FMRadioGUI:
             pass
     
     def rds_updater(self):
-        """Wątek do aktualizacji RDS podczas odtwarzania"""
+        """RDS update thread during playback."""
         try:
             while self.rds_updating and self.current_station:
-                # Co N sekund pobierz świeże dane RDS
+                # Fetch fresh RDS data every N seconds.
                 time.sleep(int(getattr(self, "rds_interval_s", 30)))
                 
                 if not self.rds_updating or not self.current_station:
                     break
                 
-                # WAŻNE: Nie uruchamiaj drugiego rtl_fm podczas nagrywania!
+                # IMPORTANT: do not start a second rtl_fm while recording.
                 if self.recording:
                     continue
                 
                 freq = self.current_station.freq
                 
                 try:
-                    # Uruchom rtl_fm + redsea na krótko (10s)
+                    # Run rtl_fm + redsea briefly (10s).
                     rtl_cmd = ['rtl_fm', '-f', f'{freq}M', '-s', '171k', 
                               '-g', str(self.gain), '-']
                     redsea_cmd = ['redsea', '-r', '171000', '-E']
@@ -4836,7 +4836,7 @@ class FMRadioGUI:
                                 try:
                                     data = json.loads(line)
 
-                                    # Aktualizuj dane stacji (wspólną ścieżką, żeby nie rozjeżdżały się pola)
+                                    # Update station data through a single path to keep fields consistent.
                                     interesting = False
                                     if data.get('ps'):
                                         interesting = True
@@ -4854,7 +4854,7 @@ class FMRadioGUI:
                                         self.current_station.update_from_rds(data)
                                         rds_found = True
 
-                                        # Aktualizuj GUI + bazę
+                                        # Update GUI + DB.
                                         self.root.after(0, self.update_station_info, self.current_station)
                                         self.db.add_or_update(self.current_station)
                                         self.db.save()
@@ -4875,33 +4875,33 @@ class FMRadioGUI:
             pass
     
     def spectrum_analyzer(self):
-        """Osobny wątek do analizy spektrum audio"""
+        """Dedicated thread for audio spectrum analysis."""
         try:
-            # Blackman window dla lepszej separacji częstotliwości
+            # Blackman window for better frequency separation.
             window = np.blackman(1024)
             nfft = 1024
-            # Coherent gain okna: potrzebne do sensownej skali amplitudy
+            # Window coherent gain: used for a sensible amplitude scale.
             coherent_gain = float(np.sum(window) / nfft)
             
             while self.spectrum_running:
                 try:
                     audio_chunks = None
                     
-                    # Pobierz dane z bufora (thread-safe)
+                    # Pull data from the buffer (thread-safe).
                     with self.audio_lock:
                         if len(self.audio_buffer) >= 2:
                             audio_chunks = self.audio_buffer[:2]
                             self.audio_buffer = self.audio_buffer[2:]
                     
-                    # Jeśli nie ma danych, czekaj
+                    # If no data, wait.
                     if audio_chunks is None:
                         time.sleep(0.02)
                         continue
                     
-                    # Połącz chunki
+                    # Join chunks.
                     audio_data = b''.join(audio_chunks)
                     
-                    # Konwertuj do numpy (stereo interleaved S16)
+                    # Convert to numpy (stereo interleaved S16).
                     samples = np.frombuffer(audio_data, dtype=np.int16)
 
                     # stereo: [L0, R0, L1, R1, ...]
@@ -4921,8 +4921,8 @@ class FMRadioGUI:
                         mag_l = np.abs(fft_l[:512])
                         mag_r = np.abs(fft_r[:512])
 
-                        # Skala dBFS:
-                        # dla sinusa o amplitudzie 1.0 w domenie czasu, |FFT| ~ coherent_gain * (N/2)
+                        # dBFS scale:
+                        # for a sine with amplitude 1.0 in time domain, |FFT| ~ coherent_gain * (N/2)
                         # => amp ~= |FFT| / (coherent_gain * (N/2))
                         ref = coherent_gain * (nfft / 2.0)
                         amp_l = mag_l / (ref + 1e-12)
@@ -4930,7 +4930,7 @@ class FMRadioGUI:
                         dbfs_l = 20.0 * np.log10(amp_l + 1e-12)
                         dbfs_r = 20.0 * np.log10(amp_r + 1e-12)
 
-                        # Wygładzanie po częstotliwości: 0=off, 1=małe, 2..=mocniejsze
+                        # Frequency smoothing: 0=off, 1=light, 2..=stronger.
                         def _smooth_freq(vec, bins):
                             if bins <= 0:
                                 return vec
@@ -4944,7 +4944,7 @@ class FMRadioGUI:
                         disp_r = _smooth_freq(dbfs_r, bins)
 
                         alpha = float(getattr(self, 'spec_time_alpha', 0.25))
-                        # Wygładzanie w czasie osobno dla kanałów
+                        # Time smoothing, per-channel.
                         if not hasattr(self, '_spec_smooth_l'):
                             ymin_init = float(getattr(self, 'spectrum_ymin_dbfs', -90.0))
                             self._spec_smooth_l = np.full(512, ymin_init, dtype=np.float32)
@@ -4959,13 +4959,13 @@ class FMRadioGUI:
                         clipped_l = np.clip(self._spec_smooth_l, ymin, ymax)
                         clipped_r = np.clip(self._spec_smooth_r, ymin, ymax)
 
-                        # Korelacja i balans
+                        # Correlation and balance.
                         rms_l = float(np.sqrt(np.mean(left * left) + 1e-12))
                         rms_r = float(np.sqrt(np.mean(right * right) + 1e-12))
                         bal_db = 20.0 * np.log10((rms_l + 1e-12) / (rms_r + 1e-12))
 
-                        # Korelacja szybciej niż np.corrcoef():
-                        # left/right mają już usuniętą średnią, więc corr = E[L*R]/(stdL*stdR)
+                        # Correlation faster than np.corrcoef():
+                        # left/right are already mean-removed, so corr = E[L*R]/(stdL*stdR)
                         if rms_l < 1e-6 or rms_r < 1e-6:
                             corr = 0.0
                         else:
@@ -4975,7 +4975,7 @@ class FMRadioGUI:
                             elif corr < -1.0:
                                 corr = -1.0
 
-                        # Punkty do wykresu (subsample)
+                        # Plot points (subsample).
                         corr_points = int(getattr(self, '_corr_points', 256))
                         step = max(1, int(len(left) / corr_points))
                         corr_x = left[::step][:corr_points]
@@ -4994,9 +4994,9 @@ class FMRadioGUI:
             self.log(self.t("log_spectrum_error", e=e))
     
     def stop_spectrum_analyzer(self):
-        """Zatrzymaj analizator spektrum"""
+        """Stop the spectrum analyzer."""
         self.spectrum_running = False
-        # Wyczyść wykresy
+        # Clear plots.
         try:
             self.line_left.set_ydata(np.full(512, -90.0))
             self.line_right.set_ydata(np.full(512, -90.0))
@@ -5007,7 +5007,7 @@ class FMRadioGUI:
             pass
     
     def update_spectrum_plot(self, mag_left, mag_right, corr_x=None, corr_y=None, corr=None, bal_db=None):
-        """Aktualizuj wykresy (wywoływane z głównego wątku)."""
+        """Update plots (called from the main thread)."""
         try:
             self.line_left.set_ydata(mag_left)
             self.line_right.set_ydata(mag_right)
@@ -5023,8 +5023,8 @@ class FMRadioGUI:
     
     
     def update_record_size(self):
-        """Aktualizuj rozmiar nagranego pliku"""
-        # Sprawdź czy nadal nagrywamy (może być zatrzymane w międzyczasie)
+        """Update the recorded file size."""
+        # Check if we are still recording (may have been stopped in the meantime).
         if not self.recording or not self.record_filename:
             return
         
@@ -5046,12 +5046,12 @@ class FMRadioGUI:
         except:
             pass
         
-        # Zaplanuj następną aktualizację za 1 sekundę TYLKO jeśli nadal nagrywamy
+        # Schedule the next update in 1 second ONLY if we are still recording.
         if self.recording:
             self.record_size_updater = self.root.after(1000, self.update_record_size)
     
     def start_scan(self):
-        """Rozpocznij skanowanie w osobnym wątku"""
+        """Start scanning in a background thread."""
         if self.scanning:
             messagebox.showinfo(self.t("info"), self.t("scan_already"))
             return
@@ -5059,12 +5059,12 @@ class FMRadioGUI:
         if self.playing:
             self.stop_playback()
         
-        # Uruchom skanowanie w wątku
+        # Run scanning in a background thread.
         scan_thread = threading.Thread(target=self.scan_fm_band, daemon=True)
         scan_thread.start()
     
     def scan_fm_band(self):
-        """Skanuj pasmo FM (w osobnym wątku)"""
+        """Scan the FM band (runs in a background thread)."""
         if getattr(self, '_closing', False):
             return
 
@@ -5134,7 +5134,7 @@ class FMRadioGUI:
         self.root.after(0, self.update_station_list)
     
     def scan_frequency_for_rds(self, freq):
-        """Skanuj pojedynczą częstotliwość"""
+        """Scan a single frequency."""
         station = FMStation(freq)
         rtl_proc = None
         redsea_proc = None
@@ -5193,12 +5193,12 @@ class FMRadioGUI:
                     pass
     
     def on_closing(self):
-        """Obsługa zamknięcia okna"""
+        """Window close handler."""
         if getattr(self, '_closing', False):
             return
         self._closing = True
 
-        # Zamknij okno ustawień jeśli otwarte
+        # Close the settings window if open.
         try:
             if hasattr(self, "_settings_win") and self._settings_win is not None:
                 self._settings_win.destroy()
@@ -5206,7 +5206,7 @@ class FMRadioGUI:
             pass
         self._settings_win = None
 
-        # Zatrzymaj wszystko bez blokowania GUI
+        # Stop everything without blocking the GUI.
         try:
             self.scanning = False
         except Exception:
@@ -5218,7 +5218,7 @@ class FMRadioGUI:
         except Exception:
             pass
 
-        # Na wszelki wypadek: ubij procesy nagrywania/odtwarzania jeśli jeszcze żyją
+        # Safety: terminate recording/playback processes if still running.
         try:
             if getattr(self, 'record_proc', None):
                 self._terminate_process(self.record_proc, name="lame")
@@ -5238,7 +5238,7 @@ class FMRadioGUI:
         except Exception:
             pass
 
-        # Natychmiast niszcz okno (brak modalnych dialogów, brak czekania)
+        # Destroy the window immediately (no modal dialogs, no waiting).
         try:
             self.root.after(0, self.root.destroy)
         except Exception:
@@ -5249,7 +5249,7 @@ class FMRadioGUI:
 
 
 def main():
-    # Sprawdź wymagane narzędzia
+    # Check required external tools.
     required_tools = ['rtl_fm', 'redsea', 'play', 'amixer']
     missing = []
     
