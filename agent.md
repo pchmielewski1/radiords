@@ -48,6 +48,39 @@ Goal: keep GitHub up to date without extra back-and-forth.
 	- force-push (`--force*`), rewriting history, deleting tags/releases,
 	- anything that could remove data from GitHub.
 
+### What counts as a “bigger change”
+
+Treat a change as “bigger” (i.e. warrants an explicit commit/push boundary and docs update in the same session) if **any** of the following is true:
+
+- **Code size:** >10 non-whitespace lines changed in `rtlsdr_fm_radio_gui.py`.
+- **User experience:** any UI text/layout change, new/removed buttons/fields, new setting, or changed default.
+- **Runtime behavior:** changes to threads/process management, shutdown behavior, SDR/GR pipeline, audio/RDS pipeline, recording.
+- **Dependencies:** adding/removing Python deps or required system tools.
+- **Data format:** changes to `fm_radio_settings.json` keys, `fm_stations_database.json` schema, or file locations (XDG/paths).
+
+For “small changes” (typos, tiny doc fixes) it is still OK to commit/push, but do not force a release/tag.
+
+### Commit message convention (keep it consistent)
+
+Use short, consistent prefixes:
+
+- `Fix:` bug fix
+- `Feat:` new feature
+- `Docs:` documentation only
+- `Refactor:` internal rework without behavior change
+- `Build:` packaging/build scripts
+- `Release:` release/tag/packaging bump (no code changes unless necessary)
+
+Format:
+
+`<Prefix>: <short summary in English>`
+
+Examples:
+
+- `Fix: avoid blocking UI on shutdown`
+- `Feat: add FM band presets`
+- `Docs: update Debian requirements`
+
 ## Versioning & release numbering (simple and sequential)
 
 We use a Debian-style sequential revision suffix for releases built from this repo.
