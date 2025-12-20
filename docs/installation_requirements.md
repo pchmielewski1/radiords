@@ -37,8 +37,12 @@ In `main()` the app checks that required commands are available in `PATH`. For f
 - `rtl_fm` — from RTL-SDR tools (scan/RDS)
 - `redsea` — RDS JSON decoder (scan/RDS)
 - `play` — SoX (plays raw PCM)
-- `lame` — MP3 recording
 - `amixer` — volume control (ALSA)
+
+For **recording**, you also need an encoder (depending on the selected recording format):
+
+- `lame` — MP3 recording
+- `flac` — FLAC recording (lossless)
 
 Without these tools, parts of the app will be unavailable.
 
@@ -113,7 +117,8 @@ If `rtl_fm` cannot see the device, or GNU Radio playback does not work, it is us
 - **GUI + station list + log**: Python + Tkinter + matplotlib + numpy
 - **Stereo playback**: GNU Radio + osmosdr + `play` + working RTL-SDR access
 - **RDS (scan and updates)**: `rtl_fm` + `redsea` + working RTL-SDR access
-- **MP3 recording**: `lame`
+- **Recording (MP3)**: `lame`
+- **Recording (FLAC, lossless)**: `flac`
 - **Volume control**: `amixer`
 - **Plots in non-Latin scripts**: font packages from section 5
 

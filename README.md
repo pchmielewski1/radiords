@@ -9,7 +9,7 @@ This app is intentionally a single-file Python/Tkinter GUI: [rtlsdr_fm_radio_gui
 - FM band scanning and station list
 - True stereo FM playback (GNU Radio + osmosdr)
 - RDS decoding (PS/RT/PTY) via `rtl_fm` + `redsea` (JSON)
-- MP3 recording (PCM → `lame`)
+- Recording: MP3 (`lame`) or FLAC (`flac`) — selectable in **Settings… → Recording format**
 - Spectrum/plots in the GUI (matplotlib)
 
 ## Installation
