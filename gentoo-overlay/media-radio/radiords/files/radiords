@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec python3 /usr/share/radiords/rtlsdr_fm_radio_gui.py "$@"
