@@ -2350,6 +2350,7 @@ class FMRadioGUI:
 
         # GNU Radio stereo RX
         self.gr_tb = None
+        self.gr_src = None
         self._gr_pipe_r = None
         self._gr_pipe_w = None
         self._gr_pipe_file = None
@@ -4169,7 +4170,7 @@ class FMRadioGUI:
         if self.gain_change_timer:
             self.root.after_cancel(self.gain_change_timer)
         
-        # If playing, schedule a restart (1 second after the last change)
+        # If playing, apply live (after debounce).
         if self.playing and self.current_station:
             self.gain_change_timer = self.root.after(1000, self.apply_gain_change)
     
@@ -4177,10 +4178,18 @@ class FMRadioGUI:
         """Apply gain change (called after the debounce timeout)."""
         if self.playing and self.current_station:
             self.log(self.t("log_apply_gain", gain=self.gain))
-            station = self.current_station
-            self.stop_playback()
-            time.sleep(0.3)
-            self.play_station(station)
+
+            # Prefer live gain change to avoid restarting the flowgraph and
+            # re-opening the RTL-SDR (which can briefly fail with usb_claim_interface).
+            src = getattr(self, "gr_src", None)
+            if src is not None:
+                try:
+                    src.set_gain(float(self.gain), 0)
+                except Exception:
+                    try:
+                        src.set_gain(float(self.gain))
+                    except Exception:
+                        pass
         self.gain_change_timer = None
     
     def on_station_double_click(self, event):
@@ -4363,6 +4372,7 @@ class FMRadioGUI:
 
         tb.start()
         self.gr_tb = tb
+        self.gr_src = src
         self._gr_pipe_file = os.fdopen(self._gr_pipe_r, 'rb', buffering=0)
 
     def _stop_gnuradio_rx(self, block=False):
@@ -4372,6 +4382,7 @@ class FMRadioGUI:
         """
         tb = self.gr_tb
         self.gr_tb = None
+        self.gr_src = None
 
         # Close the pipe first to unblock reads in stream_audio.
         if self._gr_pipe_file is not None:
