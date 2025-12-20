@@ -1,0 +1,89 @@
+name: Release Debian .deb
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: "Base SemVer (e.g. 0.1.0)"
+        required: true
+        default: "0.1.0"
+      date_yyyymmdd:
+        description: "UTC date YYYYMMDD (optional; leave empty for today UTC)"
+        required: false
+        default: ""
+      update_gentoo_overlay:
+        description: "Also bump Gentoo ebuild in gentoo-overlay/"
+        required: true
+        default: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dpkg tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Compute version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.date_yyyymmdd }}" ]; then
+            VERSION=$(python3 scripts/compute_deb_version.py --base "${{ inputs.base_version }}" --date "${{ inputs.date_yyyymmdd }}")
+          else
+            VERSION=$(python3 scripts/compute_deb_version.py --base "${{ inputs.base_version }}")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build .deb
+        id: deb
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build_deb.sh
+          chmod +x packaging/debian/usr/bin/radiords
+          DEB_PATH=$(./scripts/build_deb.sh "${{ steps.ver.outputs.version }}")
+          echo "deb_path=$DEB_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "radiords ${{ steps.ver.outputs.version }}"
+          git push origin "${{ steps.ver.outputs.tag }}"
+
+      - name: Create GitHub Release and upload .deb
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ steps.ver.outputs.tag }}"
+          name: "radiords ${{ steps.ver.outputs.version }}"
+          files: "${{ steps.deb.outputs.deb_path }}"
+          generate_release_notes: true
+
+      - name: Bump Gentoo ebuild
+        if: ${{ inputs.update_gentoo_overlay == 'true' }}
+        run: |
+          set -euo pipefail
+          python3 scripts/bump_gentoo_ebuild.py "${{ steps.ver.outputs.version }}"
+          git add gentoo-overlay/media-radio/radiords/*.ebuild
+          if git diff --cached --quiet; then
+            echo "No Gentoo changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Release: bump Gentoo ebuild for ${{ steps.ver.outputs.version }}"
+          git push
