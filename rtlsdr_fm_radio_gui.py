@@ -2349,6 +2349,7 @@ class FMRadioGUI:
         self.playing = False
         self.scanning = False
         self.current_station = None
+        self.tuned_freq_mhz = None
 
         # GNU Radio stereo RX
         self.gr_tb = None
@@ -4228,8 +4229,14 @@ class FMRadioGUI:
             if not (fm_min <= freq <= fm_max):
                 messagebox.showerror(self.t("err"), self.t("freq_out_of_range", min=fm_min, max=fm_max))
                 return
-            
-            # Create a temporary station entry
+
+            # If playback is active, Tune should retune the currently playing station
+            # (do not change DB/station.freq unless Save is used).
+            if self.playing and self.current_station is not None:
+                self.play_station(self.current_station, tuned_freq_mhz=freq)
+                return
+
+            # Otherwise: tune an ad-hoc station.
             station = FMStation(freq)
             station.ps = f"FM {freq:.1f}"
             self.play_station(station)
@@ -4286,7 +4293,7 @@ class FMRadioGUI:
 
         if abs(old_freq - new_freq) < 1e-9:
             # Still retune to be explicit (keeps UX consistent).
-            self.play_station(station)
+            self.play_station(station, tuned_freq_mhz=new_freq)
             return
 
         # Update DB key (freq is used as the primary key).
@@ -4314,7 +4321,7 @@ class FMRadioGUI:
         except Exception:
             pass
 
-        self.play_station(station)
+        self.play_station(station, tuned_freq_mhz=new_freq)
     
     def play_selected_station(self):
         """Play the currently selected station."""
@@ -4343,8 +4350,18 @@ class FMRadioGUI:
 
         self.play_station(station)
     
-    def play_station(self, station):
+    def play_station(self, station, tuned_freq_mhz=None):
         """Play an FM station."""
+        # Keep an explicit tuned frequency override so Tune can retune without
+        # mutating the station's stored frequency (DB key).
+        try:
+            if tuned_freq_mhz is None:
+                self.tuned_freq_mhz = float(getattr(station, 'freq', 0.0) or 0.0)
+            else:
+                self.tuned_freq_mhz = float(tuned_freq_mhz)
+        except Exception:
+            self.tuned_freq_mhz = tuned_freq_mhz
+
         if self.playing:
             # Switching stations needs a hard stop of the current GNU Radio flowgraph
             # before re-opening the RTL-SDR, otherwise the first attempt can fail with
@@ -4379,8 +4396,10 @@ class FMRadioGUI:
 
     def _start_station_playback(self, station):
         """Start playback for a station (assumes nothing is currently playing)."""
-        
-        self.log(self.t("log_playing", freq=station.freq, ps=station.ps))
+
+        play_freq = float(getattr(self, "tuned_freq_mhz", None) or station.freq)
+
+        self.log(self.t("log_playing", freq=play_freq, ps=station.ps))
         self.log(self.t("log_gain", gain=self.gain))
         try:
             self.status_label.config(text=self.t("playing", name=(station.ps or station.freq)))
@@ -4401,7 +4420,7 @@ class FMRadioGUI:
                 pass
 
             # GNU Radio: stereo L/R (wfm_rcv_pll)
-            self._start_gnuradio_rx(station.freq, self.gain)
+            self._start_gnuradio_rx(play_freq, self.gain)
             
             # sox play - stereo S16_LE @ 48k
             play_cmd = ['play', '-t', 'raw', '-r', '48k', '-e', 'signed',
@@ -4418,7 +4437,7 @@ class FMRadioGUI:
             # Update manual tuning field only once playback is successfully started.
             try:
                 self.freq_entry.delete(0, tk.END)
-                self.freq_entry.insert(0, f"{float(station.freq):.1f}")
+                self.freq_entry.insert(0, f"{float(play_freq):.1f}")
             except Exception:
                 pass
             
