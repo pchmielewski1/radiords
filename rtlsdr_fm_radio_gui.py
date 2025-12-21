@@ -4172,15 +4172,6 @@ class FMRadioGUI:
         """Handle volume changes."""
         self.volume = int(float(value))
         self.volume_label.config(text=f"{self.volume}%")
-        
-        # If something is playing, update volume live
-        if self.playing and self.play_proc:
-            try:
-                # amixer for ALSA
-                subprocess.run(['amixer', 'sset', 'Master', f'{self.volume}%'],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
-                pass
     
     def on_gain_change(self, value):
         """Handle RTL-SDR gain changes."""
@@ -4411,13 +4402,6 @@ class FMRadioGUI:
         try:
             if not _GNURADIO_OK:
                 raise RuntimeError("Brak GNU Radio/osmosdr – nie można uruchomić stereo RX")
-
-            # Set volume before starting.
-            try:
-                subprocess.run(['amixer', 'sset', 'Master', f'{self.volume}%'],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
-                pass
 
             # GNU Radio: stereo L/R (wfm_rcv_pll)
             self._start_gnuradio_rx(play_freq, self.gain)
@@ -4999,11 +4983,30 @@ class FMRadioGUI:
                     audio_data = audio_data[:len(audio_data) - (len(audio_data) % 4)]
                     if not audio_data:
                         continue
+
+                # Per-app software volume for playback only.
+                # Recording should stay unscaled (so it is not affected by the listening volume).
+                play_data = audio_data
+                try:
+                    vol = float(getattr(self, 'volume', 100)) / 100.0
+                except Exception:
+                    vol = 1.0
+
+                if vol <= 0.0:
+                    play_data = b"\x00" * len(audio_data)
+                elif vol < 0.999:
+                    try:
+                        samples = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+                        samples *= vol
+                        np.clip(samples, -32768.0, 32767.0, out=samples)
+                        play_data = samples.astype(np.int16).tobytes()
+                    except Exception:
+                        play_data = audio_data
                 
                 # Send to sox (playback) — priority path.
                 if self.play_proc and self.play_proc.stdin:
                     try:
-                        self.play_proc.stdin.write(audio_data)
+                        self.play_proc.stdin.write(play_data)
                     except BrokenPipeError:
                         break
                     except Exception as e:
@@ -5036,7 +5039,7 @@ class FMRadioGUI:
                 # Add to spectrum buffer (with lock and limit).
                 if self.spectrum_running:
                     with self.audio_lock:
-                        self.audio_buffer.append(audio_data)
+                        self.audio_buffer.append(play_data)
                         # Limit buffer to max 10 chunks.
                         if len(self.audio_buffer) > 10:
                             self.audio_buffer = self.audio_buffer[-10:]
