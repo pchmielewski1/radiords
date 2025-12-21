@@ -2351,6 +2351,7 @@ class FMRadioGUI:
         # GNU Radio stereo RX
         self.gr_tb = None
         self.gr_src = None
+        self._gr_stop_event = None
         self._gr_pipe_r = None
         self._gr_pipe_w = None
         self._gr_pipe_file = None
@@ -4247,7 +4248,39 @@ class FMRadioGUI:
     def play_station(self, station):
         """Play an FM station."""
         if self.playing:
-            self.stop_playback()
+            # Switching stations needs a hard stop of the current GNU Radio flowgraph
+            # before re-opening the RTL-SDR, otherwise the first attempt can fail with
+            # "Failed to open rtlsdr device".
+            self._switch_station_async(station)
+            return
+
+        self._start_station_playback(station)
+
+    def _switch_station_async(self, station):
+        """Stop current playback and start a new station once the SDR is released."""
+        try:
+            self.stop_playback(quiet=True)
+        except Exception:
+            pass
+
+        stop_event = getattr(self, "_gr_stop_event", None)
+
+        def _wait_and_start():
+            try:
+                if stop_event is not None:
+                    stop_event.wait(timeout=3.0)
+                time.sleep(0.15)
+            except Exception:
+                pass
+            try:
+                self.root.after(0, lambda: self._start_station_playback(station))
+            except Exception:
+                pass
+
+        threading.Thread(target=_wait_and_start, daemon=True).start()
+
+    def _start_station_playback(self, station):
+        """Start playback for a station (assumes nothing is currently playing)."""
         
         self.log(self.t("log_playing", freq=station.freq, ps=station.ps))
         self.log(self.t("log_gain", gain=self.gain))
@@ -4384,6 +4417,9 @@ class FMRadioGUI:
         self.gr_tb = None
         self.gr_src = None
 
+        stop_event = threading.Event()
+        self._gr_stop_event = stop_event
+
         # Close the pipe first to unblock reads in stream_audio.
         if self._gr_pipe_file is not None:
             try:
@@ -4406,7 +4442,8 @@ class FMRadioGUI:
             self._gr_pipe_r = None
 
         if tb is None:
-            return
+            stop_event.set()
+            return stop_event
 
         def _stop_wait_bg(tb_local):
             try:
@@ -4420,11 +4457,18 @@ class FMRadioGUI:
                     pass
             except Exception:
                 pass
+            finally:
+                try:
+                    stop_event.set()
+                except Exception:
+                    pass
 
         if block:
             _stop_wait_bg(tb)
         else:
             threading.Thread(target=_stop_wait_bg, args=(tb,), daemon=True).start()
+
+        return stop_event
 
     def _terminate_process(self, proc, name="proc", timeout_terminate=1.0, timeout_kill=0.5):
         """Terminate a subprocess without risking a GUI hang."""
@@ -4804,21 +4848,26 @@ class FMRadioGUI:
         """Stream stereo audio to sox and buffer it for the spectrum analyzer."""
         try:
             # 1 stereo frame = 4 bytes (2x int16).
-            chunk_bytes = 4096  # Small chunks => lower latency
+            # Slightly larger chunks reduce the chance of short underruns on startup.
+            chunk_bytes = 16384
             
             while self.playing and self.play_proc:
                 # Read from the GNU Radio pipe.
                 audio_data = None
                 if self._gr_pipe_file is not None:
                     try:
-                        audio_data = self._gr_pipe_file.read(chunk_bytes)
-                    except BlockingIOError:
+                        fd = self._gr_pipe_file.fileno()
+                        ready, _, _ = select.select([fd], [], [], 0.25)
+                        if ready:
+                            audio_data = os.read(fd, chunk_bytes)
+                        else:
+                            audio_data = None
+                    except (BlockingIOError, InterruptedError):
                         audio_data = None
                     except Exception:
                         audio_data = None
 
                 if not audio_data:
-                    time.sleep(0.01)
                     continue
 
                 # Align to stereo frames (4 bytes). If misaligned, drop trailing bytes.
