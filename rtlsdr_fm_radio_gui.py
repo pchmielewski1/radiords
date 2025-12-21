@@ -162,6 +162,7 @@ I18N = {
         "manual_tuning": "Ręczne strojenie",
         "frequency_mhz": "Częstotliwość (MHz):",
         "tune": "Tune",
+        "save": "Zapisz",
         "stations": "Stacje FM",
         "stations_col_freq": "MHz",
         "stations_col_name": "Stacja",
@@ -267,6 +268,7 @@ I18N = {
         "manual_tuning": "Manual tuning",
         "frequency_mhz": "Frequency (MHz):",
         "tune": "Tune",
+        "save": "Save",
         "stations": "FM stations",
         "stations_col_freq": "MHz",
         "stations_col_name": "Station",
@@ -3377,9 +3379,26 @@ class FMRadioGUI:
         self.freq_entry = ttk.Entry(freq_input_frame, width=10)
         self.freq_entry.pack(side=tk.LEFT, padx=5)
         self.freq_entry.insert(0, "107.5")
+
+        self.freq_step_down_button = ttk.Button(
+            freq_input_frame,
+            text="-0.1",
+            command=lambda: self.step_manual_frequency(-0.1),
+        )
+        self.freq_step_down_button.pack(side=tk.LEFT, padx=2)
+
+        self.freq_step_up_button = ttk.Button(
+            freq_input_frame,
+            text="+0.1",
+            command=lambda: self.step_manual_frequency(0.1),
+        )
+        self.freq_step_up_button.pack(side=tk.LEFT, padx=2)
         
         self.tune_button = ttk.Button(freq_input_frame, text=self.t("tune"), command=self.tune_manual_frequency)
         self.tune_button.pack(side=tk.LEFT, padx=5)
+
+        self.save_button = ttk.Button(freq_input_frame, text=self.t("save"), command=self.save_current_station_frequency)
+        self.save_button.pack(side=tk.LEFT, padx=5)
         
         # Station list panel
         self.list_frame = ttk.LabelFrame(left_frame, text=self.t("stations"), padding=6)
@@ -4217,6 +4236,85 @@ class FMRadioGUI:
             
         except ValueError:
             messagebox.showerror(self.t("err"), self.t("bad_freq"))
+
+    def step_manual_frequency(self, delta_mhz: float):
+        """Adjust the manual frequency entry by +/- delta_mhz (does not tune)."""
+        try:
+            cur_txt = (self.freq_entry.get() or "").strip()
+            if cur_txt:
+                cur = float(cur_txt)
+            elif self.current_station is not None:
+                cur = float(getattr(self.current_station, "freq", 0.0) or 0.0)
+            else:
+                cur = FM_START
+
+            new_freq = round(cur + float(delta_mhz), 1)
+            fm_min = float(getattr(self, "fm_min_mhz", FM_START))
+            fm_max = float(getattr(self, "fm_max_mhz", FM_END))
+            if new_freq < fm_min:
+                new_freq = fm_min
+            if new_freq > fm_max:
+                new_freq = fm_max
+
+            self.freq_entry.delete(0, tk.END)
+            self.freq_entry.insert(0, f"{new_freq:.1f}")
+        except Exception:
+            pass
+
+    def save_current_station_frequency(self):
+        """Save manual frequency to the currently playing station, persist DB, and retune playback."""
+        if not self.playing or not self.current_station:
+            messagebox.showwarning(self.t("warn"), self.t("need_playback_first"))
+            return
+
+        try:
+            freq_str = self.freq_entry.get().strip()
+            freq = float(freq_str)
+        except Exception:
+            messagebox.showerror(self.t("err"), self.t("bad_freq"))
+            return
+
+        fm_min = float(getattr(self, "fm_min_mhz", FM_START))
+        fm_max = float(getattr(self, "fm_max_mhz", FM_END))
+        if not (fm_min <= freq <= fm_max):
+            messagebox.showerror(self.t("err"), self.t("freq_out_of_range", min=fm_min, max=fm_max))
+            return
+
+        new_freq = round(float(freq), 1)
+        station = self.current_station
+        old_freq = float(getattr(station, "freq", new_freq) or new_freq)
+
+        if abs(old_freq - new_freq) < 1e-9:
+            # Still retune to be explicit (keeps UX consistent).
+            self.play_station(station)
+            return
+
+        # Update DB key (freq is used as the primary key).
+        try:
+            if hasattr(self, "db") and self.db is not None:
+                try:
+                    if old_freq in self.db.stations:
+                        self.db.stations.pop(old_freq, None)
+                except Exception:
+                    pass
+
+                station.freq = new_freq
+                self.db.add_or_update(station)
+                self.db.save()
+        except Exception:
+            # Fallback: still update in-memory and retune.
+            try:
+                station.freq = new_freq
+            except Exception:
+                pass
+
+        # Refresh list and retune immediately.
+        try:
+            self.update_station_list()
+        except Exception:
+            pass
+
+        self.play_station(station)
     
     def play_selected_station(self):
         """Play the currently selected station."""
@@ -4316,6 +4414,13 @@ class FMRadioGUI:
                                              stderr=subprocess.DEVNULL,
                                              start_new_session=True,
                                              bufsize=65536)  # 64KB bufor
+
+            # Update manual tuning field only once playback is successfully started.
+            try:
+                self.freq_entry.delete(0, tk.END)
+                self.freq_entry.insert(0, f"{float(station.freq):.1f}")
+            except Exception:
+                pass
             
             # Start the thread that reads audio and feeds sox.
             self.playing = True
