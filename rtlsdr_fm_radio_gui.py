@@ -5039,7 +5039,7 @@ class FMRadioGUI:
                 # Add to spectrum buffer (with lock and limit).
                 if self.spectrum_running:
                     with self.audio_lock:
-                        self.audio_buffer.append(play_data)
+                        self.audio_buffer.append(audio_data)
                         # Limit buffer to max 10 chunks.
                         if len(self.audio_buffer) > 10:
                             self.audio_buffer = self.audio_buffer[-10:]
