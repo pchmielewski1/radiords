@@ -2939,6 +2939,9 @@ class FMRadioGUI:
         
         # Volume (0-100)
         self.volume = 50
+
+        # Debounced settings save (to avoid writing JSON on every slider tick)
+        self._settings_save_timer = None
         
         # RTL-SDR gain (0-49.6 dB)
         self.gain = 42.1
@@ -3627,6 +3630,7 @@ class FMRadioGUI:
                 "osmosdr_args": "numchan=1 rtl=0",
                 "ppm": 0,
                 "rf_bandwidth_hz": 200000,
+                "gain_db": 42.1,
             },
             "ui": {
                 "language": "pl",
@@ -3642,6 +3646,7 @@ class FMRadioGUI:
                 "demod_rate_hz": 240000,
                 "audio_rate_hz": 48000,
                 "enable_deemphasis": True,
+                "volume_percent": 50,
             },
             "rds": {
                 "enable_updates_during_playback": True,
@@ -3685,6 +3690,33 @@ class FMRadioGUI:
                 json.dump(self.settings, f, indent=2, ensure_ascii=False)
         except Exception as e:
             self.log(self.t("log_settings_save_error", e=e))
+
+    def _schedule_save_settings(self, delay_ms: int = 500):
+        """Debounced settings save (GUI thread)."""
+        try:
+            timer = getattr(self, "_settings_save_timer", None)
+            if timer:
+                try:
+                    self.root.after_cancel(timer)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            self._settings_save_timer = self.root.after(delay_ms, self._flush_scheduled_settings_save)
+        except Exception:
+            self._settings_save_timer = None
+
+    def _flush_scheduled_settings_save(self):
+        try:
+            self._settings_save_timer = None
+        except Exception:
+            pass
+        try:
+            self._save_settings()
+        except Exception:
+            pass
 
     def _apply_settings_to_runtime(self, initial=False):
         """Apply persisted settings to runtime fields."""
@@ -3776,6 +3808,17 @@ class FMRadioGUI:
         except Exception:
             self.rf_bandwidth_hz = 200000
 
+        # Persisted gain (main UI slider)
+        try:
+            current_gain = float(getattr(self, "gain", 42.1))
+        except Exception:
+            current_gain = 42.1
+        try:
+            self.gain = round(float(sdr.get("gain_db", current_gain)), 1)
+        except Exception:
+            self.gain = current_gain
+        self.gain = float(max(0.0, min(49.6, float(self.gain))))
+
         try:
             self.demod_rate = int(audio.get("demod_rate_hz", self.demod_rate))
         except Exception:
@@ -3785,6 +3828,17 @@ class FMRadioGUI:
         except Exception:
             pass
         self.enable_deemphasis = bool(audio.get("enable_deemphasis", self.enable_deemphasis))
+
+        # Persisted volume (main UI slider)
+        try:
+            current_vol = int(getattr(self, "volume", 50))
+        except Exception:
+            current_vol = 50
+        try:
+            self.volume = int(audio.get("volume_percent", current_vol))
+        except Exception:
+            self.volume = current_vol
+        self.volume = int(max(0, min(100, int(self.volume))))
 
         self.enable_rds_updates = bool(rds.get("enable_updates_during_playback", self.enable_rds_updates))
         try:
@@ -4484,16 +4538,22 @@ class FMRadioGUI:
                 "output_dir": new_rec_dir,
                 "format": new_rec_format,
             }
-            self.settings["sdr"] = {
+            # Preserve any extra keys (e.g. gain_db/volume_percent) while updating known ones.
+            prev_sdr = dict((self.settings.get("sdr") or {}) if isinstance(self.settings.get("sdr"), dict) else {})
+            prev_sdr.update({
                 "osmosdr_args": new_osmo,
                 "ppm": new_ppm,
                 "rf_bandwidth_hz": int(new_bw_hz),
-            }
-            self.settings["audio"] = {
+            })
+            self.settings["sdr"] = prev_sdr
+
+            prev_audio = dict((self.settings.get("audio") or {}) if isinstance(self.settings.get("audio"), dict) else {})
+            prev_audio.update({
                 "demod_rate_hz": int(new_demod),
                 "audio_rate_hz": int(new_audio),
                 "enable_deemphasis": bool(new_deemph),
-            }
+            })
+            self.settings["audio"] = prev_audio
             self.settings["rds"] = {
                 "enable_updates_during_playback": bool(new_rds_enable),
                 "update_interval_s": int(new_rds_interval),
@@ -4717,11 +4777,26 @@ class FMRadioGUI:
         """Handle volume changes."""
         self.volume = int(float(value))
         self.volume_label.config(text=f"{self.volume}%")
+        try:
+            audio = self.settings.setdefault("audio", {})
+            if isinstance(audio, dict):
+                audio["volume_percent"] = int(self.volume)
+        except Exception:
+            pass
+        self._schedule_save_settings()
     
     def on_gain_change(self, value):
         """Handle RTL-SDR gain changes."""
         self.gain = round(float(value), 1)
         self.gain_label.config(text=f"{self.gain} dB")
+
+        try:
+            sdr = self.settings.setdefault("sdr", {})
+            if isinstance(sdr, dict):
+                sdr["gain_db"] = float(self.gain)
+        except Exception:
+            pass
+        self._schedule_save_settings()
         
         # Cancel previous timer if it exists
         if self.gain_change_timer:
