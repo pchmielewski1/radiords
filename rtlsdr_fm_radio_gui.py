@@ -4783,7 +4783,8 @@ class FMRadioGUI:
         except Exception:
             now_playing = None
 
-        self.info_nowplaying.config(text=(self.t("now_playing", text=now_playing) if now_playing else ""))
+        # Show the now-playing content directly (no localized "Now playing:" prefix).
+        self.info_nowplaying.config(text=(now_playing or ""))
         self.info_radiotext.config(text=(station.radiotext or ""))
 
         meta_parts = []
