@@ -18,6 +18,9 @@ ENV/
 recordings/
 radio_recording_debug.txt
 
+# Local-only test captures (RDS logs etc.)
+test/
+
 # Local-only agent notes/policy
 agent.md
 

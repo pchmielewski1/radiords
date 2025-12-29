@@ -34,10 +34,12 @@ In the code this is checked via `from gnuradio import ...` and `import osmosdr`.
 
 In `main()` the app checks that required commands are available in `PATH`. For full functionality you need:
 
-- `rtl_fm` — from RTL-SDR tools (scan/RDS)
-- `redsea` — RDS JSON decoder (scan/RDS)
+- `redsea` — RDS JSON decoder (used for scan and live RDS decoding)
 - `play` — SoX (plays raw PCM)
-- `amixer` — volume control (ALSA)
+
+Optional (feature-dependent):
+
+- `rtl_fm` — from RTL-SDR tools (used by the legacy external RDS backend and some scan modes)
 
 For **recording**, you also need an encoder (depending on the selected recording format):
 
@@ -116,10 +118,10 @@ If `rtl_fm` cannot see the device, or GNU Radio playback does not work, it is us
 
 - **GUI + station list + log**: Python + Tkinter + matplotlib + numpy
 - **Stereo playback**: GNU Radio + osmosdr + `play` + working RTL-SDR access
-- **RDS (scan and updates)**: `rtl_fm` + `redsea` + working RTL-SDR access
+- **Live RDS during playback (default)**: GNU Radio + `redsea` + working RTL-SDR access
+- **RDS scan / legacy external backend**: `rtl_fm` + `redsea` + working RTL-SDR access
 - **Recording (MP3)**: `lame`
 - **Recording (FLAC, lossless)**: `flac`
-- **Volume control**: `amixer`
 - **Plots in non-Latin scripts**: font packages from section 5
 
 ## 8) FM broadcast band standards (ranges and channel steps)

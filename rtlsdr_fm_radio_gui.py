@@ -23,10 +23,11 @@ matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import struct
+import math
 
 # GNU Radio (for true L/R stereo)
 try:
-    from gnuradio import gr, blocks, analog
+    from gnuradio import gr, blocks, analog, filter
     import osmosdr
     _GNURADIO_OK = True
 except Exception:
@@ -2793,6 +2794,25 @@ class FMStation:
     def get_now_playing(self):
         """Try to extract “Now Playing” from RT+ (if available)."""
         if not isinstance(self.rtplus, dict):
+            # Fallback: try to parse common RadioText formats.
+            # Example (RMF FM): "Teraz gramy: Artist - Title"
+            rt = (self.radiotext or "").strip()
+            if not rt:
+                return None
+            # Strip common prefixes.
+            for pref in (
+                "Teraz gramy:",
+                "Now playing:",
+                "Now Playing:",
+                "Aktuell:",
+                "En ce moment:",
+            ):
+                if rt.lower().startswith(pref.lower()):
+                    rt = rt[len(pref):].strip()
+                    break
+            # If it looks like "Artist - Title", show it as now-playing.
+            if " - " in rt:
+                return rt
             return None
 
         # Common-ish field names (varies by decoder/station)
@@ -2898,6 +2918,7 @@ class FMRadioGUI:
         # GNU Radio stereo RX
         self.gr_tb = None
         self.gr_src = None
+        self._gr_blocks = None
         self._gr_stop_event = None
         self._gr_pipe_r = None
         self._gr_pipe_w = None
@@ -2964,6 +2985,18 @@ class FMRadioGUI:
         
         # RDS updates
         self.rds_updating = False
+
+        # RDS backend: "rtl_fm" (external) or "gnuradio" (single-dongle, in-flowgraph MPX).
+        self.rds_backend = "rtl_fm"
+
+        # GNU Radio → redsea RDS pipeline (optional)
+        self._rds_proc = None
+        self._rds_audio_pipe_r = None
+        self._rds_audio_pipe_w = None
+        self._rds_audio_pipe_file = None
+        self._rds_feeder_thread = None
+        self._rds_reader_thread = None
+        self._rds_last_save_ts = 0.0
         
         # Spectrum
         self.spectrum_running = False
@@ -3651,6 +3684,8 @@ class FMRadioGUI:
             "rds": {
                 "enable_updates_during_playback": True,
                 "update_interval_s": 30,
+                # Backend: "rtl_fm" (external) or "gnuradio" (single-dongle).
+                "backend": "gnuradio",
             },
             "spectrum": {
                 "max_hz": SPECTRUM_MAX_HZ,
@@ -3846,6 +3881,14 @@ class FMRadioGUI:
         except Exception:
             self.rds_interval_s = 30
         self.rds_interval_s = max(5, min(600, self.rds_interval_s))
+
+        try:
+            backend = str(rds.get("backend") or getattr(self, "rds_backend", "rtl_fm")).strip().lower()
+        except Exception:
+            backend = "rtl_fm"
+        if backend not in ("rtl_fm", "gnuradio"):
+            backend = "rtl_fm"
+        self.rds_backend = backend
 
         try:
             self.spectrum_max_hz = int(spec.get("max_hz", self.spectrum_max_hz))
@@ -4554,10 +4597,13 @@ class FMRadioGUI:
                 "enable_deemphasis": bool(new_deemph),
             })
             self.settings["audio"] = prev_audio
-            self.settings["rds"] = {
+            # Preserve any extra keys (e.g. backend) while updating known ones.
+            prev_rds = dict((self.settings.get("rds") or {}) if isinstance(self.settings.get("rds"), dict) else {})
+            prev_rds.update({
                 "enable_updates_during_playback": bool(new_rds_enable),
                 "update_interval_s": int(new_rds_interval),
-            }
+            })
+            self.settings["rds"] = prev_rds
             self.settings["spectrum"] = {
                 "max_hz": int(new_spec_max),
                 "ymin_dbfs": float(new_ymin),
@@ -4728,8 +4774,8 @@ class FMRadioGUI:
             self.info_meta.config(text="")
             return
 
-        stereo_tag = " • STEREO" if station.stereo else ""
-        self.info_title.config(text=f"{station.freq:.1f} MHz — {station.ps or self.t('unknown')}{stereo_tag}")
+        # Show only RDS-derived station name (PS) in the info header.
+        self.info_title.config(text=f"{station.ps or self.t('unknown')}")
 
         now_playing = None
         try:
@@ -5058,10 +5104,20 @@ class FMRadioGUI:
             spectrum_thread = threading.Thread(target=self.spectrum_analyzer, daemon=True)
             spectrum_thread.start()
             
-            # RDS update thread (optional).
+            # RDS updates (optional).
+            # With a single RTL-SDR, external rtl_fm cannot run while osmosdr is active.
+            # Prefer GNU Radio MPX → redsea when configured.
             if getattr(self, "enable_rds_updates", True):
-                rds_thread = threading.Thread(target=self.rds_updater, daemon=True)
-                rds_thread.start()
+                if str(getattr(self, "rds_backend", "rtl_fm")) == "gnuradio":
+                    # Start GNU Radio → redsea reader after flags are set (avoid race).
+                    try:
+                        if getattr(self, "_rds_proc", None) is not None and getattr(self._rds_proc, "stdout", None) is not None:
+                            self._start_rds_reader_thread()
+                    except Exception:
+                        pass
+                else:
+                    rds_thread = threading.Thread(target=self.rds_updater, daemon=True)
+                    rds_thread.start()
             
             self.play_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
@@ -5077,12 +5133,21 @@ class FMRadioGUI:
         """Start GNU Radio RX and expose stereo PCM (S16_LE, interleaved) via a pipe for stream_audio()."""
         self._stop_gnuradio_rx()
 
+        # Keep strong refs to blocks; otherwise Python GC can collect them and
+        # close underlying file descriptors while the flowgraph is running.
+        self._gr_blocks = {}
+
         # Pipe used to transport PCM.
-        r_fd, w_fd = os.pipe()
-        self._gr_pipe_r = r_fd
-        self._gr_pipe_w = w_fd
+        audio_r_fd, audio_w_fd = os.pipe()
+        self._gr_pipe_r = audio_r_fd
+        self._gr_pipe_w = audio_w_fd
         try:
             os.set_blocking(self._gr_pipe_r, False)
+        except Exception:
+            pass
+
+        try:
+            debug_log(f"DEBUG: GNURadio audio pipe fds: r={audio_r_fd} w={audio_w_fd}")
         except Exception:
             pass
 
@@ -5092,6 +5157,10 @@ class FMRadioGUI:
             raise RuntimeError(f"demod_rate={self.demod_rate} musi być wielokrotnością audio_rate={self.audio_rate}")
 
         tb = gr.top_block()
+        try:
+            self._gr_blocks["tb"] = tb
+        except Exception:
+            pass
 
         # RTL-SDR source (osmosdr)
         args = getattr(self, "osmosdr_args", "numchan=1 rtl=0")
@@ -5099,6 +5168,11 @@ class FMRadioGUI:
             src = osmosdr.source(args=str(args))
         except Exception:
             src = osmosdr.source(args="numchan=1")
+
+        try:
+            self._gr_blocks["src"] = src
+        except Exception:
+            pass
 
         src.set_sample_rate(self.demod_rate)
         src.set_center_freq(freq_mhz * 1e6, 0)
@@ -5116,13 +5190,131 @@ class FMRadioGUI:
             pass
 
         rx = analog.wfm_rcv_pll(int(self.demod_rate), int(audio_decim), float(deemph_tau))
+        try:
+            self._gr_blocks["rx"] = rx
+        except Exception:
+            pass
+
+        # Optional: GNU Radio MPX (composite-ish) branch for RDS decoding (single-dongle).
+        # IMPORTANT: decouple the GNU Radio sink from the redsea process to avoid BrokenPipe/abort
+        # when redsea exits. We always keep the pipe read end in this process.
+        rds_enabled = bool(getattr(self, "enable_rds_updates", False)) and (str(getattr(self, "rds_backend", "rtl_fm")) == "gnuradio")
+        rds_sink = None
+        rds_f2s = None
+        rds_resamp = None
+        qdemod = None
+        self._rds_last_save_ts = 0.0
+        if rds_enabled:
+            try:
+                # Pipe for GNU Radio -> Python (we feed redsea ourselves).
+                rds_audio_r_fd, rds_audio_w_fd = os.pipe()
+                self._rds_audio_pipe_r = rds_audio_r_fd
+                self._rds_audio_pipe_w = rds_audio_w_fd
+                try:
+                    os.set_blocking(self._rds_audio_pipe_r, False)
+                except Exception:
+                    pass
+
+                try:
+                    debug_log(f"DEBUG: GNURadio RDS pipe fds: r={rds_audio_r_fd} w={rds_audio_w_fd}")
+                except Exception:
+                    pass
+
+                # Open read end for the feeder thread.
+                self._rds_audio_pipe_file = os.fdopen(self._rds_audio_pipe_r, 'rb', buffering=0)
+
+                # complex -> quadrature demod (approx FM broadcast deviation 75 kHz)
+                try:
+                    demod_rate = int(self.demod_rate)
+                except Exception:
+                    demod_rate = int(RDS_SAMPLE_RATE)
+                demod_gain = float(demod_rate) / (2.0 * math.pi * 75e3)
+                qdemod = analog.quadrature_demod_cf(demod_gain)
+                try:
+                    self._gr_blocks["qdemod"] = qdemod
+                except Exception:
+                    pass
+
+                # Resample to exactly 171 kHz (reduce ratio to keep resampler small)
+                g = int(math.gcd(int(RDS_SAMPLE_RATE), int(demod_rate))) if demod_rate > 0 else 1
+                interp = int(RDS_SAMPLE_RATE // g)
+                decim = int(demod_rate // g) if g else int(demod_rate)
+                if interp <= 0 or decim <= 0:
+                    interp, decim = int(RDS_SAMPLE_RATE), int(max(1, demod_rate))
+                rds_resamp = filter.rational_resampler_fff(
+                    interpolation=interp,
+                    decimation=decim,
+                    taps=[],
+                    fractional_bw=0.4,
+                )
+
+                try:
+                    self._gr_blocks["rds_resamp"] = rds_resamp
+                except Exception:
+                    pass
+
+                # float -> short PCM for redsea
+                rds_f2s = blocks.float_to_short(1, 32767.0)
+                rds_sink = blocks.file_descriptor_sink(gr.sizeof_short, rds_audio_w_fd)
+
+                try:
+                    self._gr_blocks["rds_f2s"] = rds_f2s
+                    self._gr_blocks["rds_sink"] = rds_sink
+                except Exception:
+                    pass
+
+                tb.connect((src, 0), (qdemod, 0))
+                tb.connect((qdemod, 0), (rds_resamp, 0))
+                tb.connect((rds_resamp, 0), (rds_f2s, 0))
+                tb.connect((rds_f2s, 0), (rds_sink, 0))
+            except Exception as e:
+                # If anything fails, fall back silently (audio should still work).
+                try:
+                    debug_log(f"DEBUG: RDS(gnuradio) init failed: {type(e).__name__}: {e}")
+                    debug_log(f"DEBUG: RDS(gnuradio) traceback:\n{traceback.format_exc()}")
+                except Exception:
+                    pass
+                try:
+                    self.log(f"RDS dbg: gnuradio backend init failed: {e}")
+                except Exception:
+                    pass
+                try:
+                    self._terminate_process(getattr(self, "_rds_proc", None), name="redsea")
+                except Exception:
+                    pass
+                self._rds_proc = None
+                try:
+                    if getattr(self, "_rds_audio_pipe_file", None) is not None:
+                        self._rds_audio_pipe_file.close()
+                except Exception:
+                    pass
+                self._rds_audio_pipe_file = None
+                try:
+                    if getattr(self, "_rds_audio_pipe_w", None) is not None:
+                        os.close(self._rds_audio_pipe_w)
+                except Exception:
+                    pass
+                self._rds_audio_pipe_w = None
+                self._rds_audio_pipe_r = None
 
         # float (-1..1) -> short (S16_LE)
         f2s_l = blocks.float_to_short(1, 32767.0)
         f2s_r = blocks.float_to_short(1, 32767.0)
 
+        try:
+            self._gr_blocks["f2s_l"] = f2s_l
+            self._gr_blocks["f2s_r"] = f2s_r
+        except Exception:
+            pass
+
         inter = blocks.interleave(gr.sizeof_short)
-        sink = blocks.file_descriptor_sink(gr.sizeof_short, w_fd)
+        sink = blocks.file_descriptor_sink(gr.sizeof_short, audio_w_fd)
+
+        try:
+            self._gr_blocks["inter"] = inter
+            self._gr_blocks["sink"] = sink
+        except Exception:
+            pass
 
         tb.connect((src, 0), (rx, 0))
         tb.connect((rx, 0), (f2s_l, 0))
@@ -5136,6 +5328,328 @@ class FMRadioGUI:
         self.gr_src = src
         self._gr_pipe_file = os.fdopen(self._gr_pipe_r, 'rb', buffering=0)
 
+        # If RDS is enabled, start the feeder thread that pushes samples into redsea.
+        # (The JSON reader thread is started from play_station() after flags are set.)
+        try:
+            if rds_enabled:
+                self._start_rds_feeder_thread()
+        except Exception:
+            pass
+
+
+    def _spawn_redsea_proc(self):
+        """(Re)start redsea for GNU Radio RDS. stdin expects raw int16 samples."""
+        try:
+            self._terminate_process(getattr(self, "_rds_proc", None), name="redsea")
+        except Exception:
+            pass
+        self._rds_proc = None
+
+        redsea_cmd = ['redsea', '-r', str(RDS_SAMPLE_RATE), '-E']
+        try:
+            proc = subprocess.Popen(
+                redsea_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=False,
+                bufsize=0,
+                start_new_session=True,
+            )
+        except Exception as e:
+            try:
+                self.log(f"RDS dbg: failed to start redsea: {e}")
+            except Exception:
+                pass
+            return None
+
+        self._rds_proc = proc
+        try:
+            self.log(f"RDS dbg: started redsea pid={proc.pid} cmd={' '.join(redsea_cmd)}")
+        except Exception:
+            pass
+
+        # Ensure the JSON reader is running (it will wait for playback flags).
+        try:
+            self._start_rds_reader_thread()
+        except Exception:
+            pass
+        return proc
+
+
+    def _start_rds_feeder_thread(self):
+        if getattr(self, "_rds_feeder_thread", None) is not None:
+            return
+
+        def _feeder():
+            last_restart_ts = 0.0
+            try:
+                while not getattr(self, "_closing", False):
+                    # Keep draining the pipe as long as the flowgraph exists to avoid pipe fill/blocked writers
+                    # during stop/switching. Only *forward* to redsea when playing+rds_updating is true.
+                    tb_running = getattr(self, "gr_tb", None) is not None
+                    if not tb_running:
+                        time.sleep(0.05)
+                        continue
+
+                    # Ensure pipe exists
+                    pipe_f = getattr(self, "_rds_audio_pipe_file", None)
+                    if pipe_f is None:
+                        time.sleep(0.1)
+                        continue
+
+                    forward = bool(getattr(self, "playing", False) and getattr(self, "rds_updating", False))
+
+                    # Ensure redsea is running
+                    proc = getattr(self, "_rds_proc", None)
+                    if (not forward) or proc is None or proc.poll() is not None or proc.stdin is None:
+                        now = time.time()
+                        if forward and (now - last_restart_ts >= 1.0):
+                            last_restart_ts = now
+                            proc = self._spawn_redsea_proc()
+                        time.sleep(0.05)
+                        # Even if we are not forwarding (not playing), still drain/discard below.
+
+                    # Read samples from GNU Radio pipe and forward to redsea
+                    try:
+                        fd = pipe_f.fileno()
+                        ready, _, _ = select.select([fd], [], [], 0.25)
+                        if not ready:
+                            continue
+                        data = os.read(fd, 16384)
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    except Exception:
+                        time.sleep(0.05)
+                        continue
+
+                    if not data:
+                        time.sleep(0.01)
+                        continue
+
+                    # Discard if we're not currently forwarding.
+                    if not forward:
+                        continue
+
+                    try:
+                        proc.stdin.write(data)
+                    except BrokenPipeError:
+                        try:
+                            self.log("RDS dbg: redsea stdin broken pipe; restarting")
+                        except Exception:
+                            pass
+                        try:
+                            self._terminate_process(proc, name="redsea")
+                        except Exception:
+                            pass
+                        self._rds_proc = None
+                        continue
+                    except Exception:
+                        continue
+            finally:
+                self._rds_feeder_thread = None
+
+        self._rds_feeder_thread = threading.Thread(target=_feeder, daemon=True)
+        self._rds_feeder_thread.start()
+
+    def _start_rds_reader_thread(self):
+        if getattr(self, "_rds_reader_thread", None) is not None:
+            return
+
+        def _reader():
+            try:
+                # Helpful one-time hint that live RDS is running.
+                try:
+                    self.log("RDS: backend=gnuradio (redsea) active")
+                except Exception:
+                    pass
+
+                # Debug counters/heartbeat so it's obvious whether RDS data is flowing.
+                last_output_ts = time.time()
+                last_heartbeat_ts = 0.0
+                lines_total = 0
+                json_ok = 0
+                json_err = 0
+                first_keys_logged = 0
+
+                # Keep a local copy to detect changes and avoid constant DB writes.
+                last_ps = None
+                last_rt = None
+                last_rtplus = None
+
+                # Wait briefly for playback flags to be set (play_station sets them after _start_gnuradio_rx).
+                start_wait = time.time()
+                while not getattr(self, "playing", False) and not getattr(self, "_closing", False):
+                    if (time.time() - start_wait) >= 2.0:
+                        break
+                    time.sleep(0.05)
+
+                # Main loop: attach to the current redsea proc when available.
+                proc = None
+
+                while getattr(self, "playing", False) and getattr(self, "rds_updating", False):
+                    if proc is None or proc.poll() is not None or proc.stdout is None:
+                        proc = getattr(self, "_rds_proc", None)
+                        if proc is None or proc.stdout is None:
+                            time.sleep(0.05)
+                            continue
+
+                    try:
+                        rc = proc.poll()
+                    except Exception:
+                        rc = None
+
+                    if rc is not None:
+                        try:
+                            self.log(f"RDS dbg: redsea exited rc={rc}")
+                        except Exception:
+                            pass
+                        break
+
+                    # Avoid blocking forever on read: use select heartbeat.
+                    try:
+                        fd = proc.stdout.fileno()
+                        ready, _, _ = select.select([fd], [], [], 1.0)
+                    except Exception:
+                        ready = []
+
+                    if not ready:
+                        now = time.time()
+                        # Log a heartbeat every ~10s if there is no output.
+                        if (now - last_output_ts) >= 10.0 and (now - last_heartbeat_ts) >= 10.0:
+                            try:
+                                self.log(f"RDS dbg: no JSON output for {int(now - last_output_ts)}s (redsea running)")
+                            except Exception:
+                                pass
+                            last_heartbeat_ts = now
+                        continue
+
+                    try:
+                        line_b = proc.stdout.readline()
+                    except Exception:
+                        break
+                    if not line_b:
+                        try:
+                            self.log("RDS dbg: redsea stdout closed")
+                        except Exception:
+                            pass
+                        break
+
+                    try:
+                        line = line_b.decode('utf-8', errors='ignore').strip()
+                    except Exception:
+                        continue
+
+                    last_output_ts = time.time()
+                    lines_total += 1
+                    try:
+                        data = json.loads(line)
+                    except Exception:
+                        json_err += 1
+                        now = time.time()
+                        if (now - last_heartbeat_ts) >= 10.0:
+                            try:
+                                self.log(f"RDS dbg: JSON parse errors: {json_err} (lines={lines_total})")
+                            except Exception:
+                                pass
+                            last_heartbeat_ts = now
+                        continue
+
+                    json_ok += 1
+
+                    # One-time peek at available keys so we know what the decoder outputs.
+                    if first_keys_logged < 2:
+                        try:
+                            keys = sorted(list(data.keys()))
+                            keys_preview = ",".join(keys[:20]) + ("…" if len(keys) > 20 else "")
+                            self.log(f"RDS dbg: keys=[{keys_preview}]")
+                        except Exception:
+                            pass
+                        first_keys_logged += 1
+
+                    now = time.time()
+                    if (now - last_heartbeat_ts) >= 10.0:
+                        try:
+                            self.log(f"RDS dbg: lines={lines_total} json_ok={json_ok} json_err={json_err}")
+                        except Exception:
+                            pass
+                        last_heartbeat_ts = now
+
+                    st = getattr(self, "current_station", None)
+                    if st is None:
+                        continue
+
+                    # Only react to useful updates.
+                    interesting = False
+                    if data.get('ps') or data.get('radiotext'):
+                        interesting = True
+                    for k in ('rtplus', 'radio_text_plus', 'radiotext_plus', 'radiotextplus', 'rt_plus'):
+                        if data.get(k):
+                            interesting = True
+                            break
+                    if any(k in data for k in ('prog_type', 'pi', 'di', 'tp', 'ta')):
+                        interesting = True
+                    if not interesting:
+                        continue
+
+                    try:
+                        prev_ps = getattr(st, "ps", None)
+                        prev_rt = getattr(st, "radiotext", None)
+                        prev_rtp = getattr(st, "rtplus", None)
+                        st.update_from_rds(data)
+                        changed = (
+                            getattr(st, "ps", None) != prev_ps
+                            or getattr(st, "radiotext", None) != prev_rt
+                            or getattr(st, "rtplus", None) != prev_rtp
+                        )
+                    except Exception:
+                        continue
+
+                    if not changed:
+                        continue
+
+                    # Log changes so it is obvious in the GUI that RDS is updating.
+                    try:
+                        parts = []
+                        new_ps = getattr(st, "ps", None)
+                        new_rt = getattr(st, "radiotext", None)
+                        if new_ps and new_ps != prev_ps:
+                            parts.append(f"PS={new_ps}")
+                        if new_rt and new_rt != prev_rt:
+                            rt_one_line = " ".join(str(new_rt).split())
+                            if len(rt_one_line) > 140:
+                                rt_one_line = rt_one_line[:140] + "…"
+                            parts.append(f"RT={rt_one_line}")
+                        if parts:
+                            self.log("RDS: " + " | ".join(parts))
+                    except Exception:
+                        pass
+
+                    # Update GUI (main thread)
+                    try:
+                        self.root.after(0, self.update_station_info, st)
+                    except Exception:
+                        pass
+
+                    # Persist station DB, but throttle writes.
+                    try:
+                        now = time.time()
+                        if now - float(getattr(self, "_rds_last_save_ts", 0.0)) >= 5.0:
+                            self.db.add_or_update(st)
+                            self.db.save()
+                            self._rds_last_save_ts = now
+                    except Exception:
+                        pass
+
+                    last_ps = getattr(st, "ps", None)
+                    last_rt = getattr(st, "radiotext", None)
+                    last_rtplus = getattr(st, "rtplus", None)
+            finally:
+                self._rds_reader_thread = None
+
+        self._rds_reader_thread = threading.Thread(target=_reader, daemon=True)
+        self._rds_reader_thread.start()
+
     def _stop_gnuradio_rx(self, block=False):
         """Stop GNU Radio RX and close the pipe.
 
@@ -5148,6 +5662,13 @@ class FMRadioGUI:
         stop_event = threading.Event()
         self._gr_stop_event = stop_event
 
+        # We'll close write FDs after the flowgraph is stopped; otherwise
+        # file_descriptor_sink may attempt to write to a closed FD.
+        w_fd_to_close = self._gr_pipe_w
+        rds_w_fd_to_close = getattr(self, "_rds_audio_pipe_w", None)
+        self._gr_pipe_w = None
+        self._rds_audio_pipe_w = None
+
         # Close the pipe first to unblock reads in stream_audio.
         if self._gr_pipe_file is not None:
             try:
@@ -5156,12 +5677,12 @@ class FMRadioGUI:
                 pass
             self._gr_pipe_file = None
 
-        if self._gr_pipe_w is not None:
-            try:
-                os.close(self._gr_pipe_w)
-            except Exception:
-                pass
-            self._gr_pipe_w = None
+        # Do NOT close the RDS read pipe here: if we close the read end before tb stops,
+        # the GNU Radio file_descriptor_sink will get EPIPE and can abort the process.
+        # The feeder thread will keep draining the pipe until tb is stopped.
+
+        # Close the read end now (safe) to unblock stream_audio; keep write end
+        # until GNU Radio is stopped.
         if self._gr_pipe_r is not None:
             try:
                 os.close(self._gr_pipe_r)
@@ -5172,6 +5693,13 @@ class FMRadioGUI:
         if tb is None:
             stop_event.set()
             return stop_event
+
+        # Stop redsea (if active)
+        try:
+            self._terminate_process(getattr(self, "_rds_proc", None), name="redsea")
+        except Exception:
+            pass
+        self._rds_proc = None
 
         def _stop_wait_bg(tb_local):
             try:
@@ -5186,6 +5714,26 @@ class FMRadioGUI:
             except Exception:
                 pass
             finally:
+                # Close write FD after tb is stopped to avoid sink errors.
+                try:
+                    if w_fd_to_close is not None:
+                        os.close(w_fd_to_close)
+                except Exception:
+                    pass
+                try:
+                    if rds_w_fd_to_close is not None:
+                        os.close(rds_w_fd_to_close)
+                except Exception:
+                    pass
+
+                # Now it is safe to close the RDS read end/file.
+                try:
+                    if getattr(self, "_rds_audio_pipe_file", None) is not None:
+                        self._rds_audio_pipe_file.close()
+                except Exception:
+                    pass
+                self._rds_audio_pipe_file = None
+                self._rds_audio_pipe_r = None
                 try:
                     stop_event.set()
                 except Exception:
@@ -5330,11 +5878,16 @@ class FMRadioGUI:
         self.record_start_button.config(state=tk.DISABLED)
         debug_log("DEBUG: Przycisk start WYŁĄCZONY")
         
-        # IMPORTANT: disable the RDS updater while recording!
-        # We cannot have two RTL-SDR clients at once (RDS updater spawns rtl_fm+redsea)
-        debug_log("DEBUG: Wyłączam RDS updater...")
-        self.rds_updating = False
-        debug_log(f"DEBUG: RDS updater wyłączony: rds_updating={self.rds_updating}")
+        # IMPORTANT: disable the external rtl_fm RDS updater while recording!
+        # With GNU Radio backend, RDS is from the same flowgraph (no second SDR client), so it can stay on.
+        try:
+            backend = str(getattr(self, "rds_backend", "rtl_fm"))
+        except Exception:
+            backend = "rtl_fm"
+        if backend != "gnuradio":
+            debug_log("DEBUG: Wyłączam RDS updater...")
+            self.rds_updating = False
+            debug_log(f"DEBUG: RDS updater wyłączony: rds_updating={self.rds_updating}")
         
         # Cancel the previous size timer if it exists (just in case)
         if self.record_size_updater:
@@ -6137,27 +6690,38 @@ class FMRadioGUI:
 
 
 def main():
-    # Check required external tools.
-    required_tools = ['rtl_fm', 'redsea', 'play', 'amixer']
-    missing = []
-    
-    for tool in required_tools:
-        try:
-            subprocess.run(['which', tool], check=True, 
-                          stdout=subprocess.DEVNULL, 
-                          stderr=subprocess.DEVNULL)
-        except subprocess.CalledProcessError:
-            missing.append(tool)
-    
-    if missing:
+    # Check external tools.
+    # Only the audio output tool is a hard requirement to start the GUI.
+    import shutil
+
+    hard_required = ["play"]
+    optional = ["redsea", "rtl_fm"]
+
+    missing_hard = [t for t in hard_required if shutil.which(t) is None]
+    missing_optional = [t for t in optional if shutil.which(t) is None]
+
+    if missing_hard:
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("Błąd", 
-                           f"Brakujące narzędzia: {', '.join(missing)}\n\n"
-                           "Zainstaluj:\n"
-                           "  sudo apt install rtl-sdr sox alsa-utils")
+        messagebox.showerror(
+            "Error",
+            "Missing required tool(s): " + ", ".join(missing_hard) + "\n\n"
+            "Install SoX (play). On Debian/Ubuntu: sudo apt install sox",
+        )
         root.destroy()
         return
+
+    if missing_optional:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showwarning(
+            "Warning",
+            "Some optional tools are missing: " + ", ".join(missing_optional) + "\n\n"
+            "- Without redsea: RDS decoding will be unavailable.\n"
+            "- Without rtl_fm: legacy external RDS backend / some scan modes will be unavailable.\n\n"
+            "You can still start the app.",
+        )
+        root.destroy()
     
     # Uruchom GUI
     root = tk.Tk()

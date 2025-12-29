@@ -6,7 +6,7 @@ This document describes how [rtlsdr_fm_radio_gui.py](../rtlsdr_fm_radio_gui.py) 
 
 - FM band scan (configurable; default preset: “worldwide”) and station database generation in JSON.
 - FM playback with **true L/R stereo** (WFM stereo demodulation).
-- Optional RDS refresh during playback (`rtl_fm` → `redsea` pipeline).
+- RDS refresh during playback (default: GNU Radio flowgraph branch → `redsea` JSON decoding).
 - MP3 recording (`lame`) while playback is running.
 - Visualizations: L/R spectrum (dBFS) + stereo correlation (L vs R scatter) + correlation/balance metric.
 - “Settings…” window persisted to `fm_radio_settings.json`.
@@ -38,7 +38,7 @@ Migration contract:
 ### 2.3 `FMRadioGUI` (runtime orchestration + UI)
 Responsibilities:
 - UI (Tk/ttk) + matplotlib.
-- Process management: `play`, `lame`, `rtl_fm`, `redsea`.
+- Process management: `play`, `lame`, `redsea` (and optionally `rtl_fm` for scan/legacy external RDS backend).
 - GNU Radio pipeline (osmosdr + `analog.wfm_rcv_pll`) that provides stereo.
 - Worker threads: PCM streaming, spectrum, RDS updater, scan.
 - Robust shutdown: `_terminate_process()`, `_stop_gnuradio_rx(block=False)`, `on_closing()`.
@@ -57,13 +57,13 @@ The full list of installation requirements (including font packages for plots an
 ### 3.2 System tools
 - `play` (sox) — odtwarzanie surowego PCM
 - `lame` — kodowanie MP3
-- `rtl_fm` + `redsea` — dekodowanie RDS
-- `amixer` — ustawianie głośności
+- `redsea` — dekodowanie RDS
+- `rtl_fm` — opcjonalnie (skan / legacy backend)
 
 - `play` (sox) — plays raw PCM
 - `lame` — MP3 encoding
-- `rtl_fm` + `redsea` — RDS decoding
-- `amixer` — volume control
+- `redsea` — RDS decoding
+- `rtl_fm` — optional (scan / legacy backend)
 
 ### 3.3 Fonts (important for matplotlib + i18n)
 
@@ -91,7 +91,8 @@ Tkinter is not thread-safe:
 - Updates the plot via `root.after(0, update_spectrum_plot)`.
 
 3) `rds_updater()`
-- Spawns `rtl_fm` and `redsea`, reads JSON lines.
+- Default: reads JSON lines from `redsea` fed by the GNU Radio flowgraph.
+- Legacy backend: spawns `rtl_fm` and `redsea`, reads JSON lines.
 - Updates `self.current_station` and persists into the DB.
 - Optional (setting `rds.enable_updates_during_playback`).
 

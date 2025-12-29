@@ -8,7 +8,7 @@ This app is intentionally a single-file Python/Tkinter GUI: [rtlsdr_fm_radio_gui
 
 - FM band scanning and station list
 - True stereo FM playback (GNU Radio + osmosdr)
-- RDS decoding (PS/RT/PTY) via `rtl_fm` + `redsea` (JSON)
+- RDS decoding (PS/RT/PTY) during playback via GNU Radio (single dongle) + `redsea` (JSON)
 - Recording: MP3 (`lame`) or FLAC (`flac`) — selectable in **Settings… → Recording format**
 - Spectrum/plots in the GUI (matplotlib)
 
@@ -35,9 +35,11 @@ python3 rtlsdr_fm_radio_gui.py
 See the full dependency list and notes (GNU Radio, system tools, fonts):
 - [docs/installation_requirements.md](docs/installation_requirements.md)
 
-## Note: “one RTL-SDR at a time”
+## Note: RTL-SDR device access
 
-You cannot use one RTL-SDR dongle concurrently in two pipelines: playback uses osmosdr (GNU Radio), while RDS uses `rtl_fm`.
+By default, live RDS updates during playback use the same GNU Radio flowgraph (single dongle).
+
+If you switch the RDS backend to the legacy external pipeline (`rtl_fm` → `redsea`), it cannot run at the same time as playback on a single dongle.
 
 ## License
 
