@@ -161,7 +161,7 @@ I18N = {
         "status_ready": "Gotowy",
         "manual_tuning": "Ręczne strojenie",
         "frequency_mhz": "Częstotliwość (MHz):",
-        "tune": "Tune",
+        "tune": "Strojenie",
         "save": "Zapisz",
         "stations": "Stacje FM",
         "stations_col_freq": "MHz",
@@ -197,6 +197,7 @@ I18N = {
         "recordings_dir": "Katalog nagrań:",
         "recording_format": "Format nagrania:",
         "dark_mode": "Tryb ciemny:",
+        "fm_band": "Pasmo FM:",
         "osmosdr_args": "osmosdr args:",
         "ppm": "PPM:",
         "bw_khz": "BW (kHz):",
@@ -233,7 +234,19 @@ I18N = {
         "scanning_progress": "🔍 Skanowanie: {freq:.1f} MHz ({progress:.0f}%)",
         "scan_done": "✓ Znaleziono {found} stacji",
         "settings_saved": "Ustawienia zapisane",
-        "now_playing": "Now playing: {text}",
+        "now_playing": "Teraz leci: {text}",
+        "unknown": "Nieznane",
+
+        # Settings validation errors (keep placeholders)
+        "err_demod_audio_positive": "demod_rate/audio_rate muszą być > 0",
+        "err_demod_multiple_audio": "demod_rate musi być wielokrotnością audio_rate",
+        "err_ymax_gt_ymin": "Y max musi być > Y min",
+        "err_smooth_time_range": "Wygładz. czas musi być w [0..1]",
+        "err_smooth_freq_range": "Wygładz. freq musi być w [0..10]",
+        "err_fps_range": "FPS musi być w [10..120]",
+        "err_corr_points_range": "Corr punkty muszą być w [64..2048]",
+        "err_corr_alpha_range": "Corr alpha musi być w [0.05..1]",
+        "err_corr_size_range": "Corr rozmiar musi być w [1..8]",
 
         # Recording/log helper strings (keep placeholders)
         "recording_log": "Nagrywanie: {file}",
@@ -241,6 +254,8 @@ I18N = {
         "record_saved": "Zapisano: {file} ({size_mb:.2f} MB)",
         "record_file_saved": "Plik zapisany: {file} ({size_mb:.2f} MB)",
         "recording_stopped": "Zatrzymano nagrywanie",
+        "recording_file_prefix": "nagranie",
+        "cannot_start_recording": "Nie można rozpocząć nagrywania: {e}",
 
         # Log strings
         "log_no_stations": "Brak stacji w bazie. Naciśnij 'Skanuj pasmo FM'.",
@@ -303,6 +318,7 @@ I18N = {
         "recordings_dir": "Recordings folder:",
         "recording_format": "Recording format:",
         "dark_mode": "Dark mode:",
+        "fm_band": "FM band:",
         "osmosdr_args": "osmosdr args:",
         "ppm": "PPM:",
         "bw_khz": "BW (kHz):",
@@ -340,6 +356,18 @@ I18N = {
         "scan_done": "✓ Found {found} stations",
         "settings_saved": "Settings saved",
         "now_playing": "Now playing: {text}",
+        "unknown": "Unknown",
+
+        # Settings validation errors
+        "err_demod_audio_positive": "demod_rate/audio_rate must be > 0",
+        "err_demod_multiple_audio": "demod_rate must be a multiple of audio_rate",
+        "err_ymax_gt_ymin": "Y max must be > Y min",
+        "err_smooth_time_range": "Time smoothing must be in [0..1]",
+        "err_smooth_freq_range": "Freq smoothing must be in [0..10]",
+        "err_fps_range": "FPS must be in [10..120]",
+        "err_corr_points_range": "Corr points must be in [64..2048]",
+        "err_corr_alpha_range": "Corr alpha must be in [0.05..1]",
+        "err_corr_size_range": "Corr marker size must be in [1..8]",
 
         # Recording/log helper strings (keep placeholders)
         "recording_log": "Recording: {file}",
@@ -347,6 +375,8 @@ I18N = {
         "record_saved": "Saved: {file} ({size_mb:.2f} MB)",
         "record_file_saved": "File saved: {file} ({size_mb:.2f} MB)",
         "recording_stopped": "Recording stopped",
+        "recording_file_prefix": "recording",
+        "cannot_start_recording": "Cannot start recording: {e}",
 
         # Log strings
         "log_no_stations": "No stations in database. Click 'Scan FM band'.",
@@ -2168,6 +2198,520 @@ I18N = {
     },
 }
 
+# Ensure newer UI keys exist in *all* language tables.
+# We use setdefault so we never override existing translations.
+I18N_EXTRA = {
+    "ar": {
+        "save": "حفظ",
+        "dark_mode": "الوضع الداكن:",
+        "fm_band": "نطاق FM:",
+        "unknown": "غير معروف",
+        "err_demod_audio_positive": "demod_rate/audio_rate يجب أن تكون > 0",
+        "err_demod_multiple_audio": "يجب أن يكون demod_rate مضاعفًا لـ audio_rate",
+        "err_ymax_gt_ymin": "يجب أن تكون Y max > Y min",
+        "err_smooth_time_range": "يجب أن يكون تنعيم الوقت ضمن [0..1]",
+        "err_smooth_freq_range": "يجب أن يكون تنعيم التردد ضمن [0..10]",
+        "err_fps_range": "يجب أن يكون FPS ضمن [10..120]",
+        "err_corr_points_range": "يجب أن تكون نقاط Corr ضمن [64..2048]",
+        "err_corr_alpha_range": "يجب أن تكون Corr alpha ضمن [0.05..1]",
+        "err_corr_size_range": "يجب أن يكون حجم Corr ضمن [1..8]",
+        "recording_log": "تسجيل: {file}",
+        "recording_status": "تسجيل: {file} ({size_mb:.2f} MB) | إدخال PCM: {mb_in:.2f} MB",
+        "record_saved": "تم الحفظ: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "تم حفظ الملف: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "تم إيقاف التسجيل",
+        "recording_file_prefix": "تسجيل",
+        "cannot_start_recording": "لا يمكن بدء التسجيل: {e}",
+    },
+    "bn": {
+        "save": "সংরক্ষণ",
+        "dark_mode": "ডার্ক মোড:",
+        "fm_band": "FM ব্যান্ড:",
+        "unknown": "অজানা",
+        "err_demod_audio_positive": "demod_rate/audio_rate অবশ্যই > 0 হতে হবে",
+        "err_demod_multiple_audio": "demod_rate অবশ্যই audio_rate-এর গুণিতক হতে হবে",
+        "err_ymax_gt_ymin": "Y max অবশ্যই Y min-এর চেয়ে বড় হতে হবে",
+        "err_smooth_time_range": "সময় স্মুথিং অবশ্যই [0..1]-এর মধ্যে হতে হবে",
+        "err_smooth_freq_range": "ফ্রিকোয়েন্সি স্মুথিং অবশ্যই [0..10]-এর মধ্যে হতে হবে",
+        "err_fps_range": "FPS অবশ্যই [10..120]-এর মধ্যে হতে হবে",
+        "err_corr_points_range": "Corr পয়েন্ট অবশ্যই [64..2048]-এর মধ্যে হতে হবে",
+        "err_corr_alpha_range": "Corr alpha অবশ্যই [0.05..1]-এর মধ্যে হতে হবে",
+        "err_corr_size_range": "Corr সাইজ অবশ্যই [1..8]-এর মধ্যে হতে হবে",
+        "recording_log": "রেকর্ডিং: {file}",
+        "recording_status": "রেকর্ডিং: {file} ({size_mb:.2f} MB) | PCM ইনপুট: {mb_in:.2f} MB",
+        "record_saved": "সংরক্ষিত: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "ফাইল সংরক্ষিত: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "রেকর্ডিং বন্ধ",
+        "recording_file_prefix": "রেকর্ডিং",
+        "cannot_start_recording": "রেকর্ডিং শুরু করা যায়নি: {e}",
+    },
+    "de": {
+        "save": "Speichern",
+        "dark_mode": "Dunkelmodus:",
+        "fm_band": "UKW-Band:",
+        "unknown": "Unbekannt",
+        "err_demod_audio_positive": "demod_rate/audio_rate muss > 0 sein",
+        "err_demod_multiple_audio": "demod_rate muss ein Vielfaches von audio_rate sein",
+        "err_ymax_gt_ymin": "Y max muss > Y min sein",
+        "err_smooth_time_range": "Zeitglättung muss in [0..1] liegen",
+        "err_smooth_freq_range": "Frequenzglättung muss in [0..10] liegen",
+        "err_fps_range": "FPS muss in [10..120] liegen",
+        "err_corr_points_range": "Corr-Punkte müssen in [64..2048] liegen",
+        "err_corr_alpha_range": "Corr-Alpha muss in [0.05..1] liegen",
+        "err_corr_size_range": "Corr-Größe muss in [1..8] liegen",
+        "recording_log": "Aufnahme: {file}",
+        "recording_status": "Aufnahme: {file} ({size_mb:.2f} MB) | PCM-Eingang: {mb_in:.2f} MB",
+        "record_saved": "Gespeichert: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Datei gespeichert: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Aufnahme beendet",
+        "recording_file_prefix": "aufnahme",
+        "cannot_start_recording": "Aufnahme konnte nicht gestartet werden: {e}",
+    },
+    "es": {
+        "save": "Guardar",
+        "dark_mode": "Modo oscuro:",
+        "fm_band": "Banda FM:",
+        "unknown": "Desconocido",
+        "err_demod_audio_positive": "demod_rate/audio_rate debe ser > 0",
+        "err_demod_multiple_audio": "demod_rate debe ser múltiplo de audio_rate",
+        "err_ymax_gt_ymin": "Y max debe ser > Y min",
+        "err_smooth_time_range": "El suavizado de tiempo debe estar en [0..1]",
+        "err_smooth_freq_range": "El suavizado de frecuencia debe estar en [0..10]",
+        "err_fps_range": "FPS debe estar en [10..120]",
+        "err_corr_points_range": "Los puntos Corr deben estar en [64..2048]",
+        "err_corr_alpha_range": "Corr alpha debe estar en [0.05..1]",
+        "err_corr_size_range": "El tamaño Corr debe estar en [1..8]",
+        "recording_log": "Grabación: {file}",
+        "recording_status": "Grabación: {file} ({size_mb:.2f} MB) | Entrada PCM: {mb_in:.2f} MB",
+        "record_saved": "Guardado: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Archivo guardado: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Grabación detenida",
+        "recording_file_prefix": "grabacion",
+        "cannot_start_recording": "No se puede iniciar la grabación: {e}",
+    },
+    "fr": {
+        "save": "Enregistrer",
+        "dark_mode": "Mode sombre :",
+        "fm_band": "Bande FM :",
+        "unknown": "Inconnu",
+        "err_demod_audio_positive": "demod_rate/audio_rate doit être > 0",
+        "err_demod_multiple_audio": "demod_rate doit être un multiple de audio_rate",
+        "err_ymax_gt_ymin": "Y max doit être > Y min",
+        "err_smooth_time_range": "Le lissage temporel doit être dans [0..1]",
+        "err_smooth_freq_range": "Le lissage en fréquence doit être dans [0..10]",
+        "err_fps_range": "FPS doit être dans [10..120]",
+        "err_corr_points_range": "Les points Corr doivent être dans [64..2048]",
+        "err_corr_alpha_range": "Corr alpha doit être dans [0.05..1]",
+        "err_corr_size_range": "La taille Corr doit être dans [1..8]",
+        "recording_log": "Enregistrement : {file}",
+        "recording_status": "Enregistrement : {file} ({size_mb:.2f} MB) | Entrée PCM : {mb_in:.2f} MB",
+        "record_saved": "Enregistré : {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Fichier enregistré : {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Enregistrement arrêté",
+        "recording_file_prefix": "enregistrement",
+        "cannot_start_recording": "Impossible de démarrer l'enregistrement : {e}",
+    },
+    "it": {
+        "save": "Salva",
+        "dark_mode": "Modalità scura:",
+        "fm_band": "Banda FM:",
+        "unknown": "Sconosciuto",
+        "err_demod_audio_positive": "demod_rate/audio_rate deve essere > 0",
+        "err_demod_multiple_audio": "demod_rate deve essere un multiplo di audio_rate",
+        "err_ymax_gt_ymin": "Y max deve essere > Y min",
+        "err_smooth_time_range": "Lo smoothing temporale deve essere in [0..1]",
+        "err_smooth_freq_range": "Lo smoothing in frequenza deve essere in [0..10]",
+        "err_fps_range": "FPS deve essere in [10..120]",
+        "err_corr_points_range": "I punti Corr devono essere in [64..2048]",
+        "err_corr_alpha_range": "Corr alpha deve essere in [0.05..1]",
+        "err_corr_size_range": "La dimensione Corr deve essere in [1..8]",
+        "recording_file_prefix": "registrazione",
+        "cannot_start_recording": "Impossibile avviare la registrazione: {e}",
+    },
+    "pt": {
+        "save": "Salvar",
+        "dark_mode": "Modo escuro:",
+        "fm_band": "Banda FM:",
+        "unknown": "Desconhecido",
+        "err_demod_audio_positive": "demod_rate/audio_rate deve ser > 0",
+        "err_demod_multiple_audio": "demod_rate deve ser múltiplo de audio_rate",
+        "err_ymax_gt_ymin": "Y max deve ser > Y min",
+        "err_smooth_time_range": "Suavização no tempo deve estar em [0..1]",
+        "err_smooth_freq_range": "Suavização em frequência deve estar em [0..10]",
+        "err_fps_range": "FPS deve estar em [10..120]",
+        "err_corr_points_range": "Pontos Corr devem estar em [64..2048]",
+        "err_corr_alpha_range": "Corr alpha deve estar em [0.05..1]",
+        "err_corr_size_range": "Tamanho Corr deve estar em [1..8]",
+        "recording_log": "Gravação: {file}",
+        "recording_status": "Gravação: {file} ({size_mb:.2f} MB) | Entrada PCM: {mb_in:.2f} MB",
+        "record_saved": "Salvo: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Arquivo salvo: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Gravação interrompida",
+        "recording_file_prefix": "gravacao",
+        "cannot_start_recording": "Não foi possível iniciar a gravação: {e}",
+    },
+    "ru": {
+        "save": "Сохранить",
+        "dark_mode": "Тёмный режим:",
+        "fm_band": "Диапазон FM:",
+        "unknown": "Неизвестно",
+        "err_demod_audio_positive": "demod_rate/audio_rate должны быть > 0",
+        "err_demod_multiple_audio": "demod_rate должен быть кратен audio_rate",
+        "err_ymax_gt_ymin": "Y max должен быть > Y min",
+        "err_smooth_time_range": "Сглаживание по времени должно быть в [0..1]",
+        "err_smooth_freq_range": "Сглаживание по частоте должно быть в [0..10]",
+        "err_fps_range": "FPS должен быть в [10..120]",
+        "err_corr_points_range": "Corr точки должны быть в [64..2048]",
+        "err_corr_alpha_range": "Corr alpha должен быть в [0.05..1]",
+        "err_corr_size_range": "Corr размер должен быть в [1..8]",
+        "recording_log": "Запись: {file}",
+        "recording_status": "Запись: {file} ({size_mb:.2f} MB) | Вход PCM: {mb_in:.2f} MB",
+        "record_saved": "Сохранено: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Файл сохранён: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Запись остановлена",
+        "recording_file_prefix": "запись",
+        "cannot_start_recording": "Не удалось начать запись: {e}",
+    },
+    "id": {
+        "save": "Simpan",
+        "dark_mode": "Mode gelap:",
+        "fm_band": "Pita FM:",
+        "unknown": "Tidak diketahui",
+        "err_demod_audio_positive": "demod_rate/audio_rate harus > 0",
+        "err_demod_multiple_audio": "demod_rate harus kelipatan dari audio_rate",
+        "err_ymax_gt_ymin": "Y max harus > Y min",
+        "err_smooth_time_range": "Perataan waktu harus dalam [0..1]",
+        "err_smooth_freq_range": "Perataan frekuensi harus dalam [0..10]",
+        "err_fps_range": "FPS harus dalam [10..120]",
+        "err_corr_points_range": "Titik Corr harus dalam [64..2048]",
+        "err_corr_alpha_range": "Corr alpha harus dalam [0.05..1]",
+        "err_corr_size_range": "Ukuran Corr harus dalam [1..8]",
+        "recording_log": "Rekam: {file}",
+        "recording_status": "Rekam: {file} ({size_mb:.2f} MB) | Masukan PCM: {mb_in:.2f} MB",
+        "record_saved": "Tersimpan: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "File tersimpan: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Rekaman dihentikan",
+        "recording_file_prefix": "rekam",
+        "cannot_start_recording": "Tidak dapat memulai rekaman: {e}",
+    },
+    "tr": {
+        "save": "Kaydet",
+        "dark_mode": "Karanlık mod:",
+        "fm_band": "FM bandı:",
+        "unknown": "Bilinmiyor",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 olmalı",
+        "err_demod_multiple_audio": "demod_rate, audio_rate'in katı olmalı",
+        "err_ymax_gt_ymin": "Y max, Y min'den büyük olmalı",
+        "err_smooth_time_range": "Zaman yumuşatma [0..1] aralığında olmalı",
+        "err_smooth_freq_range": "Frekans yumuşatma [0..10] aralığında olmalı",
+        "err_fps_range": "FPS [10..120] aralığında olmalı",
+        "err_corr_points_range": "Corr noktaları [64..2048] aralığında olmalı",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] aralığında olmalı",
+        "err_corr_size_range": "Corr boyutu [1..8] aralığında olmalı",
+        "recording_log": "Kayıt: {file}",
+        "recording_status": "Kayıt: {file} ({size_mb:.2f} MB) | PCM girişi: {mb_in:.2f} MB",
+        "record_saved": "Kaydedildi: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Dosya kaydedildi: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Kayıt durduruldu",
+        "recording_file_prefix": "kayit",
+        "cannot_start_recording": "Kayıt başlatılamadı: {e}",
+    },
+    "vi": {
+        "save": "Lưu",
+        "dark_mode": "Chế độ tối:",
+        "fm_band": "Băng FM:",
+        "unknown": "Không rõ",
+        "err_demod_audio_positive": "demod_rate/audio_rate phải > 0",
+        "err_demod_multiple_audio": "demod_rate phải là bội của audio_rate",
+        "err_ymax_gt_ymin": "Y max phải > Y min",
+        "err_smooth_time_range": "Làm mượt theo thời gian phải trong [0..1]",
+        "err_smooth_freq_range": "Làm mượt theo tần số phải trong [0..10]",
+        "err_fps_range": "FPS phải trong [10..120]",
+        "err_corr_points_range": "Điểm Corr phải trong [64..2048]",
+        "err_corr_alpha_range": "Corr alpha phải trong [0.05..1]",
+        "err_corr_size_range": "Kích thước Corr phải trong [1..8]",
+        "recording_log": "Ghi âm: {file}",
+        "recording_status": "Ghi âm: {file} ({size_mb:.2f} MB) | Đầu vào PCM: {mb_in:.2f} MB",
+        "record_saved": "Đã lưu: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Đã lưu tệp: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Đã dừng ghi âm",
+        "recording_file_prefix": "ghi_am",
+        "cannot_start_recording": "Không thể bắt đầu ghi âm: {e}",
+    },
+    "zh": {
+        "save": "保存",
+        "dark_mode": "深色模式:",
+        "fm_band": "FM 波段:",
+        "unknown": "未知",
+        "err_demod_audio_positive": "demod_rate/audio_rate 必须 > 0",
+        "err_demod_multiple_audio": "demod_rate 必须是 audio_rate 的整数倍",
+        "err_ymax_gt_ymin": "Y max 必须 > Y min",
+        "err_smooth_time_range": "时间平滑必须在 [0..1]",
+        "err_smooth_freq_range": "频率平滑必须在 [0..10]",
+        "err_fps_range": "FPS 必须在 [10..120]",
+        "err_corr_points_range": "Corr 点数必须在 [64..2048]",
+        "err_corr_alpha_range": "Corr alpha 必须在 [0.05..1]",
+        "err_corr_size_range": "Corr 大小必须在 [1..8]",
+        "recording_log": "录音: {file}",
+        "recording_status": "录音: {file} ({size_mb:.2f} MB) | PCM 输入: {mb_in:.2f} MB",
+        "record_saved": "已保存: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "文件已保存: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "录音已停止",
+        "recording_file_prefix": "录音",
+        "cannot_start_recording": "无法开始录音: {e}",
+    },
+    "ja": {
+        "save": "保存",
+        "dark_mode": "ダークモード:",
+        "fm_band": "FMバンド:",
+        "unknown": "不明",
+        "err_demod_audio_positive": "demod_rate/audio_rate は > 0 である必要があります",
+        "err_demod_multiple_audio": "demod_rate は audio_rate の倍数である必要があります",
+        "err_ymax_gt_ymin": "Y max は Y min より大きくする必要があります",
+        "err_smooth_time_range": "時間平滑は [0..1] の範囲にしてください",
+        "err_smooth_freq_range": "周波数平滑は [0..10] の範囲にしてください",
+        "err_fps_range": "FPS は [10..120] の範囲にしてください",
+        "err_corr_points_range": "Corr 点数は [64..2048] の範囲にしてください",
+        "err_corr_alpha_range": "Corr alpha は [0.05..1] の範囲にしてください",
+        "err_corr_size_range": "Corr サイズは [1..8] の範囲にしてください",
+        "recording_log": "録音: {file}",
+        "recording_status": "録音: {file} ({size_mb:.2f} MB) | PCM入力: {mb_in:.2f} MB",
+        "record_saved": "保存しました: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "ファイルを保存しました: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "録音を停止しました",
+        "recording_file_prefix": "録音",
+        "cannot_start_recording": "録音を開始できません: {e}",
+    },
+    "ko": {
+        "save": "저장",
+        "dark_mode": "다크 모드:",
+        "fm_band": "FM 밴드:",
+        "unknown": "알 수 없음",
+        "err_demod_audio_positive": "demod_rate/audio_rate 는 > 0 이어야 합니다",
+        "err_demod_multiple_audio": "demod_rate 는 audio_rate 의 배수여야 합니다",
+        "err_ymax_gt_ymin": "Y max 는 Y min 보다 커야 합니다",
+        "err_smooth_time_range": "시간 스무딩은 [0..1] 범위여야 합니다",
+        "err_smooth_freq_range": "주파수 스무딩은 [0..10] 범위여야 합니다",
+        "err_fps_range": "FPS 는 [10..120] 범위여야 합니다",
+        "err_corr_points_range": "Corr 포인트는 [64..2048] 범위여야 합니다",
+        "err_corr_alpha_range": "Corr alpha 는 [0.05..1] 범위여야 합니다",
+        "err_corr_size_range": "Corr 크기는 [1..8] 범위여야 합니다",
+        "recording_log": "녹음: {file}",
+        "recording_status": "녹음: {file} ({size_mb:.2f} MB) | PCM 입력: {mb_in:.2f} MB",
+        "record_saved": "저장됨: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "파일 저장됨: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "녹음이 중지되었습니다",
+        "recording_file_prefix": "녹음",
+        "cannot_start_recording": "녹음을 시작할 수 없습니다: {e}",
+    },
+    "hi": {
+        "save": "सहेजें",
+        "dark_mode": "डार्क मोड:",
+        "fm_band": "FM बैंड:",
+        "unknown": "अज्ञात",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 होना चाहिए",
+        "err_demod_multiple_audio": "demod_rate, audio_rate का गुणज होना चाहिए",
+        "err_ymax_gt_ymin": "Y max, Y min से बड़ा होना चाहिए",
+        "err_smooth_time_range": "टाइम स्मूदिंग [0..1] में होना चाहिए",
+        "err_smooth_freq_range": "फ्रीक्वेंसी स्मूदिंग [0..10] में होना चाहिए",
+        "err_fps_range": "FPS [10..120] में होना चाहिए",
+        "err_corr_points_range": "Corr पॉइंट्स [64..2048] में होने चाहिए",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] में होना चाहिए",
+        "err_corr_size_range": "Corr साइज [1..8] में होना चाहिए",
+        "recording_log": "रिकॉर्डिंग: {file}",
+        "recording_status": "रिकॉर्डिंग: {file} ({size_mb:.2f} MB) | PCM इनपुट: {mb_in:.2f} MB",
+        "record_saved": "सहेजा गया: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "फ़ाइल सहेजी गई: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "रिकॉर्डिंग बंद",
+        "recording_file_prefix": "रिकॉर्डिंग",
+        "cannot_start_recording": "रिकॉर्डिंग शुरू नहीं हो सकी: {e}",
+    },
+    "ur": {
+        "save": "محفوظ کریں",
+        "dark_mode": "ڈارک موڈ:",
+        "fm_band": "FM بینڈ:",
+        "unknown": "نامعلوم",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 ہونا چاہیے",
+        "err_demod_multiple_audio": "demod_rate، audio_rate کا مضاعف ہونا چاہیے",
+        "err_ymax_gt_ymin": "Y max کو Y min سے بڑا ہونا چاہیے",
+        "err_smooth_time_range": "وقت کی ہمواری [0..1] میں ہونی چاہیے",
+        "err_smooth_freq_range": "فریکوئنسی ہمواری [0..10] میں ہونی چاہیے",
+        "err_fps_range": "FPS [10..120] میں ہونا چاہیے",
+        "err_corr_points_range": "Corr پوائنٹس [64..2048] میں ہونے چاہئیں",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] میں ہونا چاہیے",
+        "err_corr_size_range": "Corr سائز [1..8] میں ہونا چاہیے",
+        "recording_log": "ریکارڈنگ: {file}",
+        "recording_status": "ریکارڈنگ: {file} ({size_mb:.2f} MB) | PCM اِن پٹ: {mb_in:.2f} MB",
+        "record_saved": "محفوظ کیا گیا: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "فائل محفوظ کی گئی: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "ریکارڈنگ بند",
+        "recording_file_prefix": "ریکارڈنگ",
+        "cannot_start_recording": "ریکارڈنگ شروع نہیں ہو سکی: {e}",
+    },
+    "fa": {
+        "save": "ذخیره",
+        "dark_mode": "حالت تیره:",
+        "fm_band": "باند FM:",
+        "unknown": "نامشخص",
+        "err_demod_audio_positive": "demod_rate/audio_rate باید > 0 باشد",
+        "err_demod_multiple_audio": "demod_rate باید مضربی از audio_rate باشد",
+        "err_ymax_gt_ymin": "Y max باید > Y min باشد",
+        "err_smooth_time_range": "هموارسازی زمان باید در [0..1] باشد",
+        "err_smooth_freq_range": "هموارسازی فرکانس باید در [0..10] باشد",
+        "err_fps_range": "FPS باید در [10..120] باشد",
+        "err_corr_points_range": "نقاط Corr باید در [64..2048] باشد",
+        "err_corr_alpha_range": "Corr alpha باید در [0.05..1] باشد",
+        "err_corr_size_range": "اندازه Corr باید در [1..8] باشد",
+        "recording_log": "ضبط: {file}",
+        "recording_status": "ضبط: {file} ({size_mb:.2f} MB) | ورودی PCM: {mb_in:.2f} MB",
+        "record_saved": "ذخیره شد: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "فایل ذخیره شد: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "ضبط متوقف شد",
+        "recording_file_prefix": "ضبط",
+        "cannot_start_recording": "نمی‌توان ضبط را شروع کرد: {e}",
+    },
+    "sw": {
+        "save": "Hifadhi",
+        "dark_mode": "Hali ya giza:",
+        "fm_band": "Bendi ya FM:",
+        "unknown": "Haijulikani",
+        "err_demod_audio_positive": "demod_rate/audio_rate lazima iwe > 0",
+        "err_demod_multiple_audio": "demod_rate lazima iwe kizidisho cha audio_rate",
+        "err_ymax_gt_ymin": "Y max lazima iwe > Y min",
+        "err_smooth_time_range": "Kulainisha muda lazima kuwe kwenye [0..1]",
+        "err_smooth_freq_range": "Kulainisha masafa lazima kuwe kwenye [0..10]",
+        "err_fps_range": "FPS lazima iwe kwenye [10..120]",
+        "err_corr_points_range": "Pointi za Corr lazima ziwe kwenye [64..2048]",
+        "err_corr_alpha_range": "Corr alpha lazima iwe kwenye [0.05..1]",
+        "err_corr_size_range": "Ukubwa wa Corr lazima uwe kwenye [1..8]",
+        "recording_log": "Rekodi: {file}",
+        "recording_status": "Rekodi: {file} ({size_mb:.2f} MB) | Ingizo la PCM: {mb_in:.2f} MB",
+        "record_saved": "Imehifadhiwa: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "Faili imehifadhiwa: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "Rekodi imesitishwa",
+        "recording_file_prefix": "rekodi",
+        "cannot_start_recording": "Haiwezi kuanza kurekodi: {e}",
+    },
+    "mr": {
+        "save": "जतन करा",
+        "dark_mode": "डार्क मोड:",
+        "fm_band": "FM बँड:",
+        "unknown": "अज्ञात",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 असणे आवश्यक आहे",
+        "err_demod_multiple_audio": "demod_rate हे audio_rate चे गुणक असणे आवश्यक आहे",
+        "err_ymax_gt_ymin": "Y max हे Y min पेक्षा मोठे असणे आवश्यक आहे",
+        "err_smooth_time_range": "टाइम स्मूदिंग [0..1] मध्ये असणे आवश्यक आहे",
+        "err_smooth_freq_range": "फ्रिक्वेन्सी स्मूदिंग [0..10] मध्ये असणे आवश्यक आहे",
+        "err_fps_range": "FPS [10..120] मध्ये असणे आवश्यक आहे",
+        "err_corr_points_range": "Corr पॉइंट्स [64..2048] मध्ये असणे आवश्यक आहे",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] मध्ये असणे आवश्यक आहे",
+        "err_corr_size_range": "Corr साइज [1..8] मध्ये असणे आवश्यक आहे",
+        "recording_log": "रेकॉर्डिंग: {file}",
+        "recording_status": "रेकॉर्डिंग: {file} ({size_mb:.2f} MB) | PCM इनपुट: {mb_in:.2f} MB",
+        "record_saved": "जतन केले: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "फाइल जतन केली: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "रेकॉर्डिंग थांबली",
+        "recording_file_prefix": "रेकॉर्डिंग",
+        "cannot_start_recording": "रेकॉर्डिंग सुरू करता आली नाही: {e}",
+    },
+    "te": {
+        "save": "సేవ్",
+        "dark_mode": "డార్క్ మోడ్:",
+        "fm_band": "FM బ్యాండ్:",
+        "unknown": "తెలియదు",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 ఉండాలి",
+        "err_demod_multiple_audio": "demod_rate, audio_rate యొక్క గుణితం అయి ఉండాలి",
+        "err_ymax_gt_ymin": "Y max, Y min కంటే పెద్దగా ఉండాలి",
+        "err_smooth_time_range": "టైమ్ స్మూతింగ్ [0..1] లో ఉండాలి",
+        "err_smooth_freq_range": "ఫ్రీక్వెన్సీ స్మూతింగ్ [0..10] లో ఉండాలి",
+        "err_fps_range": "FPS [10..120] లో ఉండాలి",
+        "err_corr_points_range": "Corr పాయింట్లు [64..2048] లో ఉండాలి",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] లో ఉండాలి",
+        "err_corr_size_range": "Corr సైజు [1..8] లో ఉండాలి",
+        "recording_log": "రికార్డింగ్: {file}",
+        "recording_status": "రికార్డింగ్: {file} ({size_mb:.2f} MB) | PCM ఇన్‌పుట్: {mb_in:.2f} MB",
+        "record_saved": "సేవ్ అయ్యింది: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "ఫైల్ సేవ్ అయ్యింది: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "రికార్డింగ్ ఆగింది",
+        "recording_file_prefix": "రికార్డింగ్",
+        "cannot_start_recording": "రికార్డింగ్ ప్రారంభించలేము: {e}",
+    },
+    "ta": {
+        "save": "சேமி",
+        "dark_mode": "இருண்ட முறை:",
+        "fm_band": "FM அலைவரம்பு:",
+        "unknown": "அறியப்படாதது",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 ஆக இருக்க வேண்டும்",
+        "err_demod_multiple_audio": "demod_rate, audio_rate இன் பலமாக இருக்க வேண்டும்",
+        "err_ymax_gt_ymin": "Y max, Y min ஐ விட பெரியதாக இருக்க வேண்டும்",
+        "err_smooth_time_range": "நேர ஸ்மூத்திங் [0..1] இல் இருக்க வேண்டும்",
+        "err_smooth_freq_range": "அதிர்வெண் ஸ்மூத்திங் [0..10] இல் இருக்க வேண்டும்",
+        "err_fps_range": "FPS [10..120] இல் இருக்க வேண்டும்",
+        "err_corr_points_range": "Corr புள்ளிகள் [64..2048] இல் இருக்க வேண்டும்",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] இல் இருக்க வேண்டும்",
+        "err_corr_size_range": "Corr அளவு [1..8] இல் இருக்க வேண்டும்",
+        "recording_log": "பதிவு: {file}",
+        "recording_status": "பதிவு: {file} ({size_mb:.2f} MB) | PCM உள்ளீடு: {mb_in:.2f} MB",
+        "record_saved": "சேமிக்கப்பட்டது: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "கோப்பு சேமிக்கப்பட்டது: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "பதிவு நிறுத்தப்பட்டது",
+        "recording_file_prefix": "பதிவு",
+        "cannot_start_recording": "பதிவை தொடங்க முடியவில்லை: {e}",
+    },
+    "th": {
+        "save": "บันทึก",
+        "dark_mode": "โหมดมืด:",
+        "fm_band": "ย่าน FM:",
+        "unknown": "ไม่ทราบ",
+        "err_demod_audio_positive": "demod_rate/audio_rate ต้อง > 0",
+        "err_demod_multiple_audio": "demod_rate ต้องเป็นพหุคูณของ audio_rate",
+        "err_ymax_gt_ymin": "Y max ต้อง > Y min",
+        "err_smooth_time_range": "การทำให้เรียบตามเวลา ต้องอยู่ใน [0..1]",
+        "err_smooth_freq_range": "การทำให้เรียบตามความถี่ ต้องอยู่ใน [0..10]",
+        "err_fps_range": "FPS ต้องอยู่ใน [10..120]",
+        "err_corr_points_range": "จุด Corr ต้องอยู่ใน [64..2048]",
+        "err_corr_alpha_range": "Corr alpha ต้องอยู่ใน [0.05..1]",
+        "err_corr_size_range": "ขนาด Corr ต้องอยู่ใน [1..8]",
+        "recording_log": "บันทึก: {file}",
+        "recording_status": "บันทึก: {file} ({size_mb:.2f} MB) | อินพุต PCM: {mb_in:.2f} MB",
+        "record_saved": "บันทึกแล้ว: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "บันทึกไฟล์แล้ว: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "หยุดบันทึกแล้ว",
+        "recording_file_prefix": "บันทึก",
+        "cannot_start_recording": "ไม่สามารถเริ่มบันทึกได้: {e}",
+    },
+    "gu": {
+        "save": "સાચવો",
+        "dark_mode": "ડાર્ક મોડ:",
+        "fm_band": "FM બેન્ડ:",
+        "unknown": "અજ્ઞાત",
+        "err_demod_audio_positive": "demod_rate/audio_rate > 0 હોવું જોઈએ",
+        "err_demod_multiple_audio": "demod_rate એ audio_rate નું ગુણાકાર હોવું જોઈએ",
+        "err_ymax_gt_ymin": "Y max એ Y min કરતા મોટું હોવું જોઈએ",
+        "err_smooth_time_range": "સમય સ્મૂથિંગ [0..1] માં હોવું જોઈએ",
+        "err_smooth_freq_range": "ફ્રીક્વન્સી સ્મૂથિંગ [0..10] માં હોવું જોઈએ",
+        "err_fps_range": "FPS [10..120] માં હોવું જોઈએ",
+        "err_corr_points_range": "Corr પોઈન્ટ્સ [64..2048] માં હોવા જોઈએ",
+        "err_corr_alpha_range": "Corr alpha [0.05..1] માં હોવું જોઈએ",
+        "err_corr_size_range": "Corr સાઇઝ [1..8] માં હોવું જોઈએ",
+        "recording_log": "રેકોર્ડિંગ: {file}",
+        "recording_status": "રેકોર્ડિંગ: {file} ({size_mb:.2f} MB) | PCM ઇનપુટ: {mb_in:.2f} MB",
+        "record_saved": "સાચવ્યું: {file} ({size_mb:.2f} MB)",
+        "record_file_saved": "ફાઇલ સાચવ્યું: {file} ({size_mb:.2f} MB)",
+        "recording_stopped": "રેકોર્ડિંગ બંધ",
+        "recording_file_prefix": "રેકોર્ડિંગ",
+        "cannot_start_recording": "રેકોર્ડિંગ શરૂ કરી શકાતું નથી: {e}",
+    },
+}
+
+try:
+    for _lang, _patch in (I18N_EXTRA or {}).items():
+        if _lang in I18N and isinstance(I18N[_lang], dict):
+            for _k, _v in _patch.items():
+                I18N[_lang].setdefault(_k, _v)
+except Exception:
+    pass
+
 
 class FMStation:
     def __init__(self, freq):
@@ -3019,6 +3563,7 @@ class FMRadioGUI:
         # Buttons
         for attr, key in (
             ("tune_button", "tune"),
+            ("save_button", "save"),
             ("scan_button", "scan_band"),
             ("play_button", "play"),
             ("stop_button", "stop"),
@@ -3731,7 +4276,7 @@ class FMRadioGUI:
 
         row = ttk.Frame(lf_ui)
         row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text="FM band:", width=14).pack(side=tk.LEFT)
+        ttk.Label(row, text=self.t("fm_band"), width=14).pack(side=tk.LEFT)
         ttk.Combobox(
             row,
             textvariable=var_fm_band,
@@ -3854,9 +4399,9 @@ class FMRadioGUI:
                 new_demod = int(var_demod.get().strip() or str(self.demod_rate))
                 new_audio = int(var_audio.get().strip() or str(self.audio_rate))
                 if new_demod <= 0 or new_audio <= 0:
-                    raise ValueError("demod_rate/audio_rate muszą być > 0")
+                    raise ValueError(self.t("err_demod_audio_positive"))
                 if (new_demod % new_audio) != 0:
-                    raise ValueError("demod_rate musi być wielokrotnością audio_rate")
+                    raise ValueError(self.t("err_demod_multiple_audio"))
 
                 new_deemph = bool(var_deemph.get())
 
@@ -3869,31 +4414,31 @@ class FMRadioGUI:
                 new_ymin = float(var_spec_ymin.get().strip() or str(self.spectrum_ymin_dbfs))
                 new_ymax = float(var_spec_ymax.get().strip() or str(self.spectrum_ymax_dbfs))
                 if new_ymax <= new_ymin:
-                    raise ValueError("Y max musi być > Y min")
+                    raise ValueError(self.t("err_ymax_gt_ymin"))
 
                 new_spec_alpha = float(var_spec_alpha.get().strip() or str(self.spec_time_alpha))
                 if not (0.0 <= new_spec_alpha <= 1.0):
-                    raise ValueError("Wygładz. czas musi być w [0..1]")
+                    raise ValueError(self.t("err_smooth_time_range"))
 
                 new_spec_fbins = int(var_spec_fbins.get().strip() or str(self.spec_freq_smooth_bins))
                 if not (0 <= new_spec_fbins <= 10):
-                    raise ValueError("Wygładz. freq musi być w [0..10]")
+                    raise ValueError(self.t("err_smooth_freq_range"))
 
                 new_spec_fps = int(var_spec_fps.get().strip() or str(self.spec_fps))
                 if not (10 <= new_spec_fps <= 120):
-                    raise ValueError("FPS musi być w [10..120]")
+                    raise ValueError(self.t("err_fps_range"))
 
                 new_corr_points = int(var_corr_points.get().strip() or str(self.corr_points))
                 if not (64 <= new_corr_points <= 2048):
-                    raise ValueError("Corr punkty muszą być w [64..2048]")
+                    raise ValueError(self.t("err_corr_points_range"))
 
                 new_corr_alpha = float(var_corr_alpha.get().strip() or str(self.corr_point_alpha))
                 if not (0.05 <= new_corr_alpha <= 1.0):
-                    raise ValueError("Corr alpha musi być w [0.05..1]")
+                    raise ValueError(self.t("err_corr_alpha_range"))
 
                 new_corr_msize = int(var_corr_msize.get().strip() or str(self.corr_marker_size))
                 if not (1 <= new_corr_msize <= 8):
-                    raise ValueError("Corr rozmiar musi być w [1..8]")
+                    raise ValueError(self.t("err_corr_size_range"))
 
                 new_rec_dir = (var_rec_dir.get() or "recordings").strip()
                 if not new_rec_dir:
@@ -4062,7 +4607,7 @@ class FMRadioGUI:
         for station in stations:
             iid = f"{station.freq:.1f}"
             stereo_txt = "STEREO" if station.stereo else ""
-            ps_txt = station.ps or "Unknown"
+            ps_txt = station.ps or self.t("unknown")
             self._station_by_iid[iid] = station
             try:
                 self.station_tree.insert("", tk.END, iid=iid, values=(f"{station.freq:.1f}", ps_txt, stereo_txt))
@@ -4124,7 +4669,7 @@ class FMRadioGUI:
             return
 
         stereo_tag = " • STEREO" if station.stereo else ""
-        self.info_title.config(text=f"{station.freq:.1f} MHz — {station.ps or 'Unknown'}{stereo_tag}")
+        self.info_title.config(text=f"{station.freq:.1f} MHz — {station.ps or self.t('unknown')}{stereo_tag}")
 
         now_playing = None
         try:
@@ -4395,7 +4940,7 @@ class FMRadioGUI:
         try:
             self.status_label.config(text=self.t("playing", name=(station.ps or station.freq)))
         except Exception:
-            self.status_label.config(text=f"▶ Odtwarzanie: {station.ps or station.freq}")
+            pass
         self.update_station_info(station)
         self.current_station = station
         
@@ -4743,7 +5288,14 @@ class FMRadioGUI:
             pass
 
         ext = "flac" if rec_fmt == "flac" else "mp3"
-        filename = os.path.join(out_dir, f"recording_{station_name}_{timestamp}.{ext}")
+        prefix_raw = self.t("recording_file_prefix")
+        prefix = str(prefix_raw or "recording")
+        prefix = "".join(c for c in prefix if c.isalnum() or c in (' ', '-', '_')).strip()
+        prefix = prefix.replace(' ', '_')
+        if not prefix:
+            prefix = "recording"
+
+        filename = os.path.join(out_dir, f"{prefix}_{station_name}_{timestamp}.{ext}")
         display_name = os.path.basename(filename)
         debug_log(f"DEBUG: Wygenerowana nazwa pliku: '{filename}'")
         
@@ -4849,7 +5401,7 @@ class FMRadioGUI:
             self.recording = False
             debug_log(f"DEBUG: Przyciski przywrócone: recording={self.recording}")
             self.log(self.t("log_record_error", e=e))
-            messagebox.showerror(self.t("err"), f"Nie można rozpocząć nagrywania: {e}")
+            messagebox.showerror(self.t("err"), self.t("cannot_start_recording", e=e))
             debug_log("=" * 60)
     
     def stop_recording(self, quiet=False):
