@@ -114,6 +114,89 @@ If `rtl_fm` cannot see the device, or GNU Radio playback does not work, it is us
 - a conflict with the DVB driver (sometimes you need to detach/blacklist a module depending on the dongle),
 - `osmosdr` arguments (e.g. selecting the device).
 
+Below are practical “do this now” steps for a typical Linux system.
+
+### 6.1 Quick sanity checks (recommended)
+
+1) Verify the dongle is visible on USB:
+
+```bash
+lsusb | grep -i -E 'realtek|rtl|2832|rtl2832|dvb'
+```
+
+2) If you have RTL-SDR tools installed, run a basic device test:
+
+```bash
+rtl_test -t
+```
+
+If `rtl_test` cannot open the device, fix permissions / driver conflict first (below).
+
+### 6.2 Fix missing USB permissions (udev rules)
+
+On many distros you need udev rules so non-root users can access the RTL-SDR.
+
+1) Create a udev rules file:
+
+```bash
+sudo tee /etc/udev/rules.d/20-rtlsdr.rules >/dev/null <<'EOF'
+# RTL-SDR (commonly Realtek RTL2832U-based dongles)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE:="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE:="0666"
+EOF
+```
+
+2) Reload udev and replug the device:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+3) Unplug/replug the dongle, then retry:
+
+```bash
+rtl_test -t
+```
+
+Notes:
+- Vendor/product IDs can differ. If the rule above doesn’t match your dongle, run `lsusb` and adjust `idVendor`/`idProduct`.
+- Some distros ship these rules in their `rtl-sdr` package already.
+
+### 6.3 Fix DVB driver conflicts (kernel modules)
+
+Some dongles get grabbed by the DVB kernel driver (`dvb_usb_rtl28xxu`), which prevents RTL-SDR userspace tools (and GNU Radio/osmosdr) from opening it.
+
+1) Temporarily detach the driver (until reboot):
+
+```bash
+sudo modprobe -r dvb_usb_rtl28xxu rtl2832 rtl2830 || true
+```
+
+2) Permanently blacklist the DVB driver (recommended for SDR use):
+
+```bash
+sudo tee /etc/modprobe.d/rtl-sdr-blacklist.conf >/dev/null <<'EOF'
+blacklist dvb_usb_rtl28xxu
+blacklist rtl2832
+blacklist rtl2830
+EOF
+```
+
+3) Reboot (or unload + replug) and test again:
+
+```bash
+rtl_test -t
+```
+
+### 6.4 osmosdr device selection (if playback can’t open RTL)
+
+If GNU Radio/osmosdr still can’t open the device, check the app setting:
+
+- `sdr.osmosdr_args` (example default: `numchan=1 rtl=0`)
+
+If you have multiple dongles, try selecting the correct one by index (e.g. `rtl=0`, `rtl=1`) or by serial number (depends on your osmosdr build).
+
 ## 7) Quick mapping: what each feature needs
 
 - **GUI + station list + log**: Python + Tkinter + matplotlib + numpy
