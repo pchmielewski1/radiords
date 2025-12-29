@@ -136,13 +136,39 @@ If `rtl_test` cannot open the device, fix permissions / driver conflict first (b
 
 On many distros you need udev rules so non-root users can access the RTL-SDR.
 
+Good news: many systems already ship RTL-SDR udev rules with the `librtlsdr`/`rtl-sdr` packages.
+For example, it is common to have:
+
+```bash
+ls -l /lib/udev/rules.d/60-librtlsdr0.rules
+```
+
+That packaged rule typically sets `MODE="0660"` and `GROUP="plugdev"` for RTL2832U/RTL2838 devices.
+In that case you usually only need to ensure your user is in the `plugdev` group.
+
+1) Add your user to `plugdev` and re-login:
+
+```bash
+sudo usermod -aG plugdev "$USER"
+```
+
+Log out/in (or reboot) so the new group membership applies.
+
+2) Replug the dongle and test:
+
+```bash
+rtl_test -t
+```
+
+If you do NOT have a packaged rule (or it doesn’t match your dongle), create a local one:
+
 1) Create a udev rules file:
 
 ```bash
 sudo tee /etc/udev/rules.d/20-rtlsdr.rules >/dev/null <<'EOF'
 # RTL-SDR (commonly Realtek RTL2832U-based dongles)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE:="0666"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE:="0666"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE:="0660", GROUP:="plugdev"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE:="0660", GROUP:="plugdev"
 EOF
 ```
 
@@ -176,10 +202,11 @@ sudo modprobe -r dvb_usb_rtl28xxu rtl2832 rtl2830 || true
 2) Permanently blacklist the DVB driver (recommended for SDR use):
 
 ```bash
-sudo tee /etc/modprobe.d/rtl-sdr-blacklist.conf >/dev/null <<'EOF'
+sudo tee /etc/modprobe.d/blacklist-rtl.conf >/dev/null <<'EOF'
 blacklist dvb_usb_rtl28xxu
 blacklist rtl2832
 blacklist rtl2830
+blacklist rtl2832_sdr
 EOF
 ```
 
