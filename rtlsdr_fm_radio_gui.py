@@ -3008,8 +3008,39 @@ class FMRadioGUI:
 
         # Plot redraw pacing (Tk timer). Analyzer thread only updates the latest payload.
         self._spec_plot_latest = None
+        self._spec_plot_seq = 0
+        self._spec_plot_drawn_seq = 0
         self._spec_ui_after_id = None
         self._corr_text_last_ts = 0.0
+
+        # Perf/debug (opt-in; avoid spamming GUI thread)
+        self._perf_debug = False
+        self._perf_after_id = None
+        self._perf_last_report_ts = 0.0
+        self._perf_comp_frames = 0
+        self._perf_draw_frames = 0
+        self._perf_draw_time_s = 0.0
+        self._perf_ui_tick_jitter_s = 0.0
+        self._perf_ui_tick_expected_ts = 0.0
+        self._perf_ui_tick_count = 0
+
+        # Enable perf logging via env var or settings (manual edit): debug.perf=true
+        try:
+            env_on = str(os.environ.get("RADIO_DEBUG_PERF", "")).strip().lower() in ("1", "true", "yes", "on")
+        except Exception:
+            env_on = False
+        try:
+            dbg = (self.settings or {}).get("debug", {})
+            settings_on = bool(dbg.get("perf")) if isinstance(dbg, dict) else False
+        except Exception:
+            settings_on = False
+        self._perf_debug = bool(env_on or settings_on)
+
+        if self._perf_debug:
+            try:
+                self._start_perf_monitor()
+            except Exception:
+                pass
 
         # Stereo correlation / L-R balance (second plot)
         self._corr_points = 256
@@ -6440,6 +6471,14 @@ class FMRadioGUI:
                         corr_y = right[::step][:corr_points]
 
                         self._spec_plot_latest = (clipped_l, clipped_r, corr_x, corr_y, corr, bal_db)
+                        try:
+                            self._spec_plot_seq += 1
+                        except Exception:
+                            self._spec_plot_seq = 1
+                        try:
+                            self._perf_comp_frames += 1
+                        except Exception:
+                            pass
                     
                     fps = int(getattr(self, 'spec_fps', 66))
                     time.sleep(max(0.005, 1.0 / float(max(1, fps))))
@@ -6511,21 +6550,48 @@ class FMRadioGUI:
             if not hasattr(self, 'canvas') or self.canvas is None:
                 return
 
+            # UI tick jitter tracking (debug)
+            try:
+                if self._perf_debug:
+                    now = time.time()
+                    exp = float(getattr(self, '_perf_ui_tick_expected_ts', 0.0))
+                    if exp > 0.0:
+                        self._perf_ui_tick_jitter_s += abs(now - exp)
+                        self._perf_ui_tick_count += 1
+            except Exception:
+                pass
+
             payload = getattr(self, '_spec_plot_latest', None)
-            if payload is not None:
+            seq = int(getattr(self, '_spec_plot_seq', 0))
+            drawn_seq = int(getattr(self, '_spec_plot_drawn_seq', 0))
+
+            # Only draw if we have a newer frame than the last drawn one.
+            if payload is not None and seq != drawn_seq:
+                t0 = time.time()
                 self.update_spectrum_plot(*payload)
                 try:
-                    # draw() is synchronous (more regular pacing than draw_idle).
-                    self.canvas.draw()
+                    # draw_idle generally plays nicer with Tk event loop.
+                    self.canvas.draw_idle()
                 except Exception:
-                    try:
-                        self.canvas.draw_idle()
-                    except Exception:
-                        pass
+                    pass
+                dt = max(0.0, time.time() - t0)
+                self._spec_plot_drawn_seq = seq
+
+                try:
+                    self._perf_draw_frames += 1
+                    self._perf_draw_time_s += dt
+                except Exception:
+                    pass
 
             fps = int(getattr(self, 'spec_fps', 66))
-            fps = int(max(1, min(60, fps)))
+            # Matplotlib/TkAgg rarely sustains true 60 FPS smoothly; cap to reduce thrash.
+            fps = int(max(1, min(30, fps)))
             delay_ms = int(max(5, round(1000.0 / float(fps))))
+            try:
+                if self._perf_debug:
+                    self._perf_ui_tick_expected_ts = time.time() + (delay_ms / 1000.0)
+            except Exception:
+                pass
             self._spec_ui_after_id = self.root.after(delay_ms, self._spectrum_ui_tick)
         except Exception:
             # Try again later rather than killing the loop.
@@ -6533,6 +6599,75 @@ class FMRadioGUI:
                 self._spec_ui_after_id = self.root.after(50, self._spectrum_ui_tick)
             except Exception:
                 self._spec_ui_after_id = None
+
+    def _start_perf_monitor(self):
+        """Periodic perf report to the log (opt-in)."""
+        try:
+            self._stop_perf_monitor()
+        except Exception:
+            pass
+        self._perf_last_report_ts = time.time()
+        self._perf_after_id = self.root.after(2000, self._perf_report_tick)
+
+    def _stop_perf_monitor(self):
+        try:
+            if getattr(self, '_perf_after_id', None) is not None:
+                self.root.after_cancel(self._perf_after_id)
+        except Exception:
+            pass
+        self._perf_after_id = None
+
+    def _perf_report_tick(self):
+        """Log perf stats every few seconds without flooding."""
+        try:
+            self._perf_after_id = None
+            if not getattr(self, '_perf_debug', False):
+                return
+
+            now = time.time()
+            last = float(getattr(self, '_perf_last_report_ts', now))
+            dt = max(0.001, now - last)
+            self._perf_last_report_ts = now
+
+            comp = int(getattr(self, '_perf_comp_frames', 0))
+            draw = int(getattr(self, '_perf_draw_frames', 0))
+            draw_time = float(getattr(self, '_perf_draw_time_s', 0.0))
+
+            # reset counters for next interval
+            self._perf_comp_frames = 0
+            self._perf_draw_frames = 0
+            self._perf_draw_time_s = 0.0
+
+            comp_fps = comp / dt
+            draw_fps = draw / dt
+            avg_draw_ms = (draw_time / max(1, draw)) * 1000.0
+
+            # UI tick jitter
+            jit_sum = float(getattr(self, '_perf_ui_tick_jitter_s', 0.0))
+            jit_n = int(getattr(self, '_perf_ui_tick_count', 0))
+            self._perf_ui_tick_jitter_s = 0.0
+            self._perf_ui_tick_count = 0
+            avg_jit_ms = (jit_sum / max(1, jit_n)) * 1000.0
+
+            # Audio buffer depth (chunks)
+            try:
+                with self.audio_lock:
+                    buf_chunks = len(self.audio_buffer)
+            except Exception:
+                buf_chunks = -1
+
+            self.log(
+                f"PERF: comp_fps={comp_fps:.1f} draw_fps={draw_fps:.1f} "
+                f"avg_draw_ms={avg_draw_ms:.1f} ui_jitter_ms={avg_jit_ms:.1f} "
+                f"audio_buf_chunks={buf_chunks}"
+            )
+        except Exception:
+            pass
+        finally:
+            try:
+                self._perf_after_id = self.root.after(3000, self._perf_report_tick)
+            except Exception:
+                self._perf_after_id = None
     
     
     def update_record_size(self):
