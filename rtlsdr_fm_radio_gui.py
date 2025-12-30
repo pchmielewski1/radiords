@@ -3006,6 +3006,11 @@ class FMRadioGUI:
         self.spectrum_smooth = np.full(512, -70.0, dtype=np.float32)  # buffer for smoothing
         self.spectrum_floor_db = -80.0
 
+        # Plot redraw coalescing (Matplotlib/TkAgg can't reliably sustain high FPS; avoid event backlog)
+        self._spec_plot_latest = None
+        self._spec_plot_pending = False
+        self._spec_plot_last_draw_ts = 0.0
+
         # Stereo correlation / L-R balance (second plot)
         self._corr_points = 256
 
@@ -6423,7 +6428,10 @@ class FMRadioGUI:
                         corr_x = left[::step][:corr_points]
                         corr_y = right[::step][:corr_points]
 
-                        self.root.after(0, self.update_spectrum_plot, clipped_l, clipped_r, corr_x, corr_y, corr, bal_db)
+                        # Store the latest frame and schedule a single GUI redraw.
+                        # This prevents the Tk event queue from filling up when rendering is slower than computation.
+                        self._spec_plot_latest = (clipped_l, clipped_r, corr_x, corr_y, corr, bal_db)
+                        self._request_spectrum_plot_update()
                     
                     fps = int(getattr(self, 'spec_fps', 66))
                     time.sleep(max(0.005, 1.0 / float(max(1, fps))))
@@ -6462,6 +6470,57 @@ class FMRadioGUI:
             self.canvas.draw_idle()
         except:
             pass
+
+    def _request_spectrum_plot_update(self):
+        """Coalesce spectrum/correlation redraw requests into a single pending UI callback."""
+        try:
+            if getattr(self, '_spec_plot_pending', False):
+                return
+            self._spec_plot_pending = True
+            self.root.after(0, self._flush_spectrum_plot_update)
+        except Exception:
+            self._spec_plot_pending = False
+
+    def _flush_spectrum_plot_update(self):
+        """Redraw plots at most at the configured FPS, dropping intermediate frames if needed."""
+        try:
+            self._spec_plot_pending = False
+
+            if not getattr(self, 'spectrum_running', False):
+                return
+            if not hasattr(self, 'canvas') or self.canvas is None:
+                return
+
+            fps = int(getattr(self, 'spec_fps', 66))
+            fps = int(max(1, min(120, fps)))
+            min_dt = 1.0 / float(fps)
+
+            now = time.time()
+            last = float(getattr(self, '_spec_plot_last_draw_ts', 0.0))
+            dt = now - last
+            if dt < min_dt:
+                delay_ms = int(max(1, (min_dt - dt) * 1000.0))
+                # Keep one pending callback; delay to honor FPS.
+                if not getattr(self, '_spec_plot_pending', False):
+                    self._spec_plot_pending = True
+                    self.root.after(delay_ms, self._flush_spectrum_plot_update)
+                return
+
+            payload = getattr(self, '_spec_plot_latest', None)
+            if not payload:
+                return
+
+            self._spec_plot_last_draw_ts = now
+            self.update_spectrum_plot(*payload)
+
+            # If a newer frame arrived during the draw, schedule another flush.
+            if getattr(self, '_spec_plot_latest', None) is not payload:
+                self._request_spectrum_plot_update()
+        except Exception:
+            try:
+                self._spec_plot_pending = False
+            except Exception:
+                pass
     
     
     def update_record_size(self):
