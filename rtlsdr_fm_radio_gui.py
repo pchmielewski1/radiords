@@ -6661,6 +6661,14 @@ class FMRadioGUI:
                 f"avg_draw_ms={avg_draw_ms:.1f} ui_jitter_ms={avg_jit_ms:.1f} "
                 f"audio_buf_chunks={buf_chunks}"
             )
+            try:
+                debug_log(
+                    f"PERF: comp_fps={comp_fps:.1f} draw_fps={draw_fps:.1f} "
+                    f"avg_draw_ms={avg_draw_ms:.1f} ui_jitter_ms={avg_jit_ms:.1f} "
+                    f"audio_buf_chunks={buf_chunks}"
+                )
+            except Exception:
+                pass
         except Exception:
             pass
         finally:
