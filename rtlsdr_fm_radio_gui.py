@@ -17,6 +17,7 @@ from tkinter import ttk, scrolledtext, messagebox
 import select
 from copy import deepcopy
 import signal
+import traceback
 import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
@@ -84,6 +85,13 @@ def debug_log(msg):
     except:
         pass
     print(line.strip())  # Also to stdout
+
+# ---------------------------------------------------------------------------
+# Hard-coded visualization perf debug (requested)
+# ---------------------------------------------------------------------------
+# NOTE: This is intentionally NOT controlled by env flags.
+# It is meant for diagnosing slow spectrum/correlation rendering.
+FORCE_VISUAL_PERF_DEBUG = True
 
 # Configuration
 FM_START = 88.0
@@ -3013,8 +3021,16 @@ class FMRadioGUI:
         self._spec_ui_after_id = None
         self._corr_text_last_ts = 0.0
 
+        # Visualization performance: use Matplotlib blitting on TkAgg to avoid full redraws.
+        # Full canvas redraw on TkAgg is often ~5 FPS; blitting typically improves this a lot.
+        self._viz_blit_enabled = True
+        self._viz_blit_bg_spec = None
+        self._viz_blit_bg_corr = None
+        self._viz_blit_connected = False
+
         # Perf/debug (opt-in; avoid spamming GUI thread)
-        self._perf_debug = False
+        # Forced perf debug for visualization diagnostics (no env flags).
+        self._perf_debug = bool(FORCE_VISUAL_PERF_DEBUG)
         self._perf_after_id = None
         self._perf_last_report_ts = 0.0
         self._perf_comp_frames = 0
@@ -3024,23 +3040,23 @@ class FMRadioGUI:
         self._perf_ui_tick_expected_ts = 0.0
         self._perf_ui_tick_count = 0
 
-        # Enable perf logging via env var or settings (manual edit): debug.perf=true
-        try:
-            env_on = str(os.environ.get("RADIO_DEBUG_PERF", "")).strip().lower() in ("1", "true", "yes", "on")
-        except Exception:
-            env_on = False
-        try:
-            dbg = (self.settings or {}).get("debug", {})
-            settings_on = bool(dbg.get("perf")) if isinstance(dbg, dict) else False
-        except Exception:
-            settings_on = False
-        self._perf_debug = bool(env_on or settings_on)
+        # Detailed perf breakdown (best-effort, approximate; cross-thread counters).
+        self._perf_comp_time_s = 0.0
+        self._perf_comp_join_time_s = 0.0
+        self._perf_comp_conv_time_s = 0.0
+        self._perf_comp_fft_time_s = 0.0
+        self._perf_comp_post_time_s = 0.0
 
-        if self._perf_debug:
-            try:
-                self._start_perf_monitor()
-            except Exception:
-                pass
+        self._perf_payload_age_s_sum = 0.0
+        self._perf_payload_age_n = 0
+        self._perf_dropped_frames = 0
+
+        # Startup latency (how long until the first payload reaches the UI)
+        self._perf_play_start_ts = 0.0
+        self._perf_first_payload_ts = 0.0
+        self._perf_first_draw_ts = 0.0
+
+        # Perf monitor is started/stopped together with playback to keep idle noise low.
 
         # Stereo correlation / L-R balance (second plot)
         self._corr_points = 256
@@ -3279,11 +3295,109 @@ class FMRadioGUI:
 
             if hasattr(self, "canvas") and self.canvas is not None:
                 try:
+                    # Theme changes affect colors/grid/etc; invalidate blit cache.
+                    self._invalidate_viz_blit_cache()
                     self.canvas.draw_idle()
                 except Exception:
                     pass
         except Exception:
             pass
+
+    def _invalidate_viz_blit_cache(self):
+        """Invalidate Matplotlib blit background caches (next draw will recapture)."""
+        try:
+            self._viz_blit_bg_spec = None
+            self._viz_blit_bg_corr = None
+        except Exception:
+            pass
+
+    def _capture_viz_blit_background(self) -> bool:
+        """Capture background for both axes (UI thread only)."""
+        try:
+            if not getattr(self, "_viz_blit_enabled", False):
+                return False
+            if not hasattr(self, "canvas") or self.canvas is None:
+                return False
+            if not hasattr(self, "ax_spec") or self.ax_spec is None:
+                return False
+            if not hasattr(self, "ax_corr") or self.ax_corr is None:
+                return False
+
+            # Full draw once to get a renderer and up-to-date backgrounds.
+            self.canvas.draw()
+            self._viz_blit_bg_spec = self.canvas.copy_from_bbox(self.ax_spec.bbox)
+            self._viz_blit_bg_corr = self.canvas.copy_from_bbox(self.ax_corr.bbox)
+            return True
+        except Exception:
+            try:
+                self._viz_blit_bg_spec = None
+                self._viz_blit_bg_corr = None
+            except Exception:
+                pass
+            return False
+
+    def _setup_viz_blit(self):
+        """Enable and wire blitting for the spectrum/correlation plots."""
+        if not getattr(self, "_viz_blit_enabled", False):
+            return
+        if not hasattr(self, "canvas") or self.canvas is None:
+            return
+
+        # Mark dynamic artists as animated so Matplotlib blitting can skip them in the background.
+        for art_name in ("line_left", "line_right", "line_corr", "corr_text"):
+            try:
+                art = getattr(self, art_name, None)
+                if art is not None:
+                    art.set_animated(True)
+            except Exception:
+                pass
+
+        # Invalidate cache when the canvas is resized.
+        if not getattr(self, "_viz_blit_connected", False):
+            try:
+                self.canvas.mpl_connect("resize_event", lambda _evt: self._invalidate_viz_blit_cache())
+                self._viz_blit_connected = True
+            except Exception:
+                self._viz_blit_connected = False
+
+        # Capture initial background.
+        self._invalidate_viz_blit_cache()
+        self._capture_viz_blit_background()
+
+    def _viz_blit_draw(self) -> bool:
+        """Fast redraw via blitting; returns True on success (UI thread only)."""
+        if not getattr(self, "_viz_blit_enabled", False):
+            return False
+        try:
+            if self.canvas is None:
+                return False
+            if self._viz_blit_bg_spec is None or self._viz_blit_bg_corr is None:
+                if not self._capture_viz_blit_background():
+                    return False
+
+            # Spectrum axis
+            self.canvas.restore_region(self._viz_blit_bg_spec)
+            try:
+                self.ax_spec.draw_artist(self.line_left)
+                self.ax_spec.draw_artist(self.line_right)
+            except Exception:
+                pass
+            self.canvas.blit(self.ax_spec.bbox)
+
+            # Correlation axis
+            self.canvas.restore_region(self._viz_blit_bg_corr)
+            try:
+                self.ax_corr.draw_artist(self.line_corr)
+                self.ax_corr.draw_artist(self.corr_text)
+            except Exception:
+                pass
+            self.canvas.blit(self.ax_corr.bbox)
+
+            return True
+        except Exception:
+            # If anything goes wrong (e.g. renderer invalidated), fall back and recapture next time.
+            self._invalidate_viz_blit_cache()
+            return False
 
     def t(self, key, **kwargs):
         """Translate UI string by key with fallback to English."""
@@ -3582,6 +3696,12 @@ class FMRadioGUI:
 
         try:
             self.root.title(self.t("app_title"))
+        except Exception:
+            pass
+
+        # Titles/labels affect the figure; invalidate blit cache.
+        try:
+            self._invalidate_viz_blit_cache()
         except Exception:
             pass
 
@@ -3988,6 +4108,7 @@ class FMRadioGUI:
         try:
             self.ax_spec.set_xlim(0, self.spectrum_max_hz)
             self.ax_spec.set_ylim(self.spectrum_ymin_dbfs, self.spectrum_ymax_dbfs)
+            self._invalidate_viz_blit_cache()
             self.canvas.draw_idle()
         except Exception:
             pass
@@ -4009,6 +4130,7 @@ class FMRadioGUI:
                 self.line_left.set_xdata(freqs)
                 self.line_right.set_xdata(freqs)
 
+            self._invalidate_viz_blit_cache()
             self.canvas.draw_idle()
         except Exception:
             pass
@@ -4269,6 +4391,12 @@ class FMRadioGUI:
             transform=self.ax_corr.transAxes,
             ha='left', va='top', fontsize=8
         )
+
+        # Enable blitting for fast plot updates.
+        try:
+            self._setup_viz_blit()
+        except Exception:
+            pass
 
     def open_settings_window(self):
         """Open the settings window (Toplevel)."""
@@ -5132,6 +5260,27 @@ class FMRadioGUI:
             self.playing = True
             self.spectrum_running = True
             self.rds_updating = True
+
+            # Perf/debug baseline for visualization (reset per playback start).
+            try:
+                if self._perf_debug:
+                    self._perf_play_start_ts = float(time.time())
+                    self._perf_first_payload_ts = 0.0
+                    self._perf_first_draw_ts = 0.0
+
+                    self._perf_comp_frames = 0
+                    self._perf_draw_frames = 0
+                    self._perf_draw_time_s = 0.0
+                    self._perf_comp_time_s = 0.0
+                    self._perf_comp_join_time_s = 0.0
+                    self._perf_comp_conv_time_s = 0.0
+                    self._perf_comp_fft_time_s = 0.0
+                    self._perf_comp_post_time_s = 0.0
+                    self._perf_payload_age_s_sum = 0.0
+                    self._perf_payload_age_n = 0
+                    self._perf_dropped_frames = 0
+            except Exception:
+                pass
             
             # Audio streaming thread.
             audio_thread = threading.Thread(target=self.stream_audio, daemon=True)
@@ -5144,6 +5293,13 @@ class FMRadioGUI:
             # UI redraw loop for plots (prevents Tk event backlog and reduces stutter).
             try:
                 self._start_spectrum_ui_loop()
+            except Exception:
+                pass
+
+            # Start periodic perf reporting while playback is active.
+            try:
+                if self._perf_debug:
+                    self._start_perf_monitor()
             except Exception:
                 pass
             
@@ -5845,6 +6001,12 @@ class FMRadioGUI:
             self._stop_spectrum_ui_loop()
         except Exception:
             pass
+
+        # Stop perf monitor quickly (do not spam when idle).
+        try:
+            self._stop_perf_monitor()
+        except Exception:
+            pass
         
         if not quiet:
             self.log(self.t("log_playback_stopped"))
@@ -6186,6 +6348,11 @@ class FMRadioGUI:
             # 1 stereo frame = 4 bytes (2x int16).
             # Slightly larger chunks reduce the chance of short underruns on startup.
             chunk_bytes = 16384
+
+            # Visualization chunking: smaller slices give higher spectrum FPS without
+            # affecting the playback write size.
+            viz_chunk_bytes = 4096  # 1024 stereo frames @ 48kHz ~= 21.3 ms
+            viz_chunk_bytes = int(max(1024, viz_chunk_bytes - (viz_chunk_bytes % 4)))
             
             while self.playing and self.play_proc:
                 # Read from the GNU Radio pipe.
@@ -6267,10 +6434,22 @@ class FMRadioGUI:
                 # Add to spectrum buffer (with lock and limit).
                 if self.spectrum_running:
                     with self.audio_lock:
-                        self.audio_buffer.append(audio_data)
-                        # Limit buffer to max 10 chunks.
-                        if len(self.audio_buffer) > 10:
-                            self.audio_buffer = self.audio_buffer[-10:]
+                        # Split into smaller pieces so the analyzer can run at 25–30 FPS.
+                        try:
+                            for off in range(0, len(audio_data), viz_chunk_bytes):
+                                part = audio_data[off:off + viz_chunk_bytes]
+                                if len(part) < 4:
+                                    continue
+                                if len(part) % 4 != 0:
+                                    part = part[:len(part) - (len(part) % 4)]
+                                if part:
+                                    self.audio_buffer.append(part)
+                        except Exception:
+                            self.audio_buffer.append(audio_data)
+
+                        # Limit buffer depth (chunks). Keep a bit more than before since chunks are smaller now.
+                        if len(self.audio_buffer) > 40:
+                            self.audio_buffer = self.audio_buffer[-40:]
                         
         except Exception as e:
             self.log(self.t("log_stream_error", e=e))
@@ -6374,23 +6553,38 @@ class FMRadioGUI:
             
             while self.spectrum_running:
                 try:
-                    audio_chunks = None
+                    audio_chunk = None
                     
                     # Pull data from the buffer (thread-safe).
                     with self.audio_lock:
-                        if len(self.audio_buffer) >= 2:
-                            audio_chunks = self.audio_buffer[:2]
-                            self.audio_buffer = self.audio_buffer[2:]
+                        if len(self.audio_buffer) >= 1:
+                            audio_chunk = self.audio_buffer[0]
+                            self.audio_buffer = self.audio_buffer[1:]
                     
                     # If no data, wait.
-                    if audio_chunks is None:
+                    if audio_chunk is None:
                         time.sleep(0.02)
                         continue
                     
-                    # Join chunks.
-                    audio_data = b''.join(audio_chunks)
+                    t_iter0 = None
+                    try:
+                        if self._perf_debug:
+                            t_iter0 = time.perf_counter()
+                    except Exception:
+                        t_iter0 = None
+
+                    # Single chunk (pre-sliced in stream_audio for higher FPS).
+                    t_join0 = None
+                    t_join1 = None
+                    audio_data = audio_chunk
                     
                     # Convert to numpy (stereo interleaved S16).
+                    t_conv0 = None
+                    try:
+                        if t_join1 is not None:
+                            t_conv0 = time.perf_counter()
+                    except Exception:
+                        t_conv0 = None
                     samples = np.frombuffer(audio_data, dtype=np.int16)
 
                     # stereo: [L0, R0, L1, R1, ...]
@@ -6405,10 +6599,30 @@ class FMRadioGUI:
                         wl = left[:nfft] * window
                         wr = right[:nfft] * window
 
+                        t_conv1 = None
+                        try:
+                            if t_conv0 is not None:
+                                t_conv1 = time.perf_counter()
+                        except Exception:
+                            t_conv1 = None
+
+                        t_fft0 = None
+                        try:
+                            if t_conv1 is not None:
+                                t_fft0 = time.perf_counter()
+                        except Exception:
+                            t_fft0 = None
                         fft_l = np.fft.rfft(wl, n=nfft)
                         fft_r = np.fft.rfft(wr, n=nfft)
                         mag_l = np.abs(fft_l[:512])
                         mag_r = np.abs(fft_r[:512])
+
+                        t_fft1 = None
+                        try:
+                            if t_fft0 is not None:
+                                t_fft1 = time.perf_counter()
+                        except Exception:
+                            t_fft1 = None
 
                         # dBFS scale:
                         # for a sine with amplitude 1.0 in time domain, |FFT| ~ coherent_gain * (N/2)
@@ -6470,13 +6684,45 @@ class FMRadioGUI:
                         corr_x = left[::step][:corr_points]
                         corr_y = right[::step][:corr_points]
 
-                        self._spec_plot_latest = (clipped_l, clipped_r, corr_x, corr_y, corr, bal_db)
+                        gen_ts = None
+                        try:
+                            gen_ts = time.time()
+                        except Exception:
+                            gen_ts = None
+
+                        # Include gen_ts in payload for UI latency tracking.
+                        self._spec_plot_latest = (clipped_l, clipped_r, corr_x, corr_y, corr, bal_db, gen_ts)
                         try:
                             self._spec_plot_seq += 1
                         except Exception:
                             self._spec_plot_seq = 1
+
+                        # Startup latency: first payload generation.
+                        try:
+                            if self._perf_debug and float(getattr(self, '_perf_first_payload_ts', 0.0)) <= 0.0 and gen_ts is not None:
+                                self._perf_first_payload_ts = float(gen_ts)
+                        except Exception:
+                            pass
+
+                        # Perf counters.
                         try:
                             self._perf_comp_frames += 1
+                        except Exception:
+                            pass
+
+                        # Detailed perf breakdown (best-effort).
+                        try:
+                            if self._perf_debug and t_iter0 is not None:
+                                t_end = time.perf_counter()
+                                self._perf_comp_time_s += max(0.0, t_end - t_iter0)
+                                if t_join0 is not None and t_join1 is not None:
+                                    self._perf_comp_join_time_s += max(0.0, t_join1 - t_join0)
+                                if t_conv0 is not None and t_conv1 is not None:
+                                    self._perf_comp_conv_time_s += max(0.0, t_conv1 - t_conv0)
+                                if t_fft0 is not None and t_fft1 is not None:
+                                    self._perf_comp_fft_time_s += max(0.0, t_fft1 - t_fft0)
+                                if t_fft1 is not None:
+                                    self._perf_comp_post_time_s += max(0.0, t_end - t_fft1)
                         except Exception:
                             pass
                     
@@ -6503,7 +6749,7 @@ class FMRadioGUI:
         except Exception:
             pass
     
-    def update_spectrum_plot(self, mag_left, mag_right, corr_x=None, corr_y=None, corr=None, bal_db=None):
+    def update_spectrum_plot(self, mag_left, mag_right, corr_x=None, corr_y=None, corr=None, bal_db=None, gen_ts=None):
         """Update plots (called from the main thread)."""
         try:
             self.line_left.set_ydata(mag_left)
@@ -6567,15 +6813,45 @@ class FMRadioGUI:
 
             # Only draw if we have a newer frame than the last drawn one.
             if payload is not None and seq != drawn_seq:
-                t0 = time.time()
-                self.update_spectrum_plot(*payload)
+                # Count dropped frames (newer seq overwrote older payloads).
                 try:
-                    # draw_idle generally plays nicer with Tk event loop.
-                    self.canvas.draw_idle()
+                    if self._perf_debug:
+                        gap = int(seq - drawn_seq)
+                        if gap > 1:
+                            self._perf_dropped_frames += int(gap - 1)
                 except Exception:
                     pass
-                dt = max(0.0, time.time() - t0)
+
+                # Track payload age (compute->UI latency).
+                try:
+                    if self._perf_debug and isinstance(payload, tuple) and len(payload) >= 7:
+                        gen_ts = payload[6]
+                        if gen_ts is not None:
+                            age = time.time() - float(gen_ts)
+                            if age >= 0.0:
+                                self._perf_payload_age_s_sum += float(age)
+                                self._perf_payload_age_n += 1
+                except Exception:
+                    pass
+
+                t0 = time.perf_counter()
+                self.update_spectrum_plot(*payload)
+                try:
+                    # Prefer blitting to avoid full TkAgg redraw (major FPS win).
+                    if not self._viz_blit_draw():
+                        # Fallback: schedule a normal redraw.
+                        self.canvas.draw_idle()
+                except Exception:
+                    pass
+                dt = max(0.0, time.perf_counter() - t0)
                 self._spec_plot_drawn_seq = seq
+
+                # Startup latency: first UI-side draw attempt.
+                try:
+                    if self._perf_debug and float(getattr(self, '_perf_first_draw_ts', 0.0)) <= 0.0:
+                        self._perf_first_draw_ts = float(time.time())
+                except Exception:
+                    pass
 
                 try:
                     self._perf_draw_frames += 1
@@ -6633,14 +6909,41 @@ class FMRadioGUI:
             draw = int(getattr(self, '_perf_draw_frames', 0))
             draw_time = float(getattr(self, '_perf_draw_time_s', 0.0))
 
+            comp_time = float(getattr(self, '_perf_comp_time_s', 0.0))
+            join_time = float(getattr(self, '_perf_comp_join_time_s', 0.0))
+            conv_time = float(getattr(self, '_perf_comp_conv_time_s', 0.0))
+            fft_time = float(getattr(self, '_perf_comp_fft_time_s', 0.0))
+            post_time = float(getattr(self, '_perf_comp_post_time_s', 0.0))
+
+            age_sum = float(getattr(self, '_perf_payload_age_s_sum', 0.0))
+            age_n = int(getattr(self, '_perf_payload_age_n', 0))
+            dropped = int(getattr(self, '_perf_dropped_frames', 0))
+
             # reset counters for next interval
             self._perf_comp_frames = 0
             self._perf_draw_frames = 0
             self._perf_draw_time_s = 0.0
+            self._perf_comp_time_s = 0.0
+            self._perf_comp_join_time_s = 0.0
+            self._perf_comp_conv_time_s = 0.0
+            self._perf_comp_fft_time_s = 0.0
+            self._perf_comp_post_time_s = 0.0
+            self._perf_payload_age_s_sum = 0.0
+            self._perf_payload_age_n = 0
+            self._perf_dropped_frames = 0
 
             comp_fps = comp / dt
             draw_fps = draw / dt
             avg_draw_ms = (draw_time / max(1, draw)) * 1000.0
+            avg_comp_ms = (comp_time / max(1, comp)) * 1000.0
+
+            # Breakdown (per computed frame)
+            join_ms = (join_time / max(1, comp)) * 1000.0
+            conv_ms = (conv_time / max(1, comp)) * 1000.0
+            fft_ms = (fft_time / max(1, comp)) * 1000.0
+            post_ms = (post_time / max(1, comp)) * 1000.0
+
+            avg_age_ms = (age_sum / max(1, age_n)) * 1000.0
 
             # UI tick jitter
             jit_sum = float(getattr(self, '_perf_ui_tick_jitter_s', 0.0))
@@ -6657,22 +6960,34 @@ class FMRadioGUI:
                 buf_chunks = -1
 
             self.log(
-                f"PERF: comp_fps={comp_fps:.1f} draw_fps={draw_fps:.1f} "
-                f"avg_draw_ms={avg_draw_ms:.1f} ui_jitter_ms={avg_jit_ms:.1f} "
-                f"audio_buf_chunks={buf_chunks}"
+                f"PERF-VIZ: comp_fps={comp_fps:.1f} draw_fps={draw_fps:.1f} "
+                f"avg_comp_ms={avg_comp_ms:.1f} avg_draw_ms={avg_draw_ms:.1f} "
+                f"payload_age_ms={avg_age_ms:.1f} dropped={dropped} "
+                f"ui_jitter_ms={avg_jit_ms:.1f} audio_buf_chunks={buf_chunks} "
+                f"breakdown_ms(j/c/f/p)={join_ms:.1f}/{conv_ms:.1f}/{fft_ms:.1f}/{post_ms:.1f}"
             )
+
+            # Startup latency report (emit once after we have data).
             try:
-                debug_log(
-                    f"PERF: comp_fps={comp_fps:.1f} draw_fps={draw_fps:.1f} "
-                    f"avg_draw_ms={avg_draw_ms:.1f} ui_jitter_ms={avg_jit_ms:.1f} "
-                    f"audio_buf_chunks={buf_chunks}"
-                )
+                play_start = float(getattr(self, '_perf_play_start_ts', 0.0))
+                first_payload = float(getattr(self, '_perf_first_payload_ts', 0.0))
+                first_draw = float(getattr(self, '_perf_first_draw_ts', 0.0))
+                if play_start > 0.0 and first_payload > 0.0 and first_draw > 0.0:
+                    self.log(
+                        f"PERF-VIZ-START: payload_after_ms={(first_payload - play_start) * 1000.0:.0f} "
+                        f"draw_after_ms={(first_draw - play_start) * 1000.0:.0f}"
+                    )
+                    # One-shot.
+                    self._perf_play_start_ts = 0.0
+                    self._perf_first_payload_ts = 0.0
+                    self._perf_first_draw_ts = 0.0
             except Exception:
                 pass
         except Exception:
             pass
         finally:
             try:
+                # Keep cadence modest to avoid impacting UI.
                 self._perf_after_id = self.root.after(3000, self._perf_report_tick)
             except Exception:
                 self._perf_after_id = None
